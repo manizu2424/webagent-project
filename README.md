@@ -221,7 +221,8 @@ AI 결과에는 최소한 `diagnosisPublicId`, `automationScore`, `recommendedTa
 
 ## 관련 문서
 
-- `1-WEBAGENT_KR_MVP_기획안.md`: 제품 포지셔닝, 대상 고객, MVP 목표와 사용자 흐름
-- `2-WEBAGENT_KR_MVP_DB_2가지_구성_기획서.md`: 데이터베이스 구성안과 설계 배경
-- `3-WEBAGENT_KR_Codex_개발실행문서_PostgreSQL.md`: Next.js, PostgreSQL, n8n 구현 기준
+- `docs/consolidated/README.md`: 통합 문서 구성과 적용 우선순위
+- `docs/consolidated/01-MVP_통합_제품기획서.md`: 제품 포지셔닝, 대상 고객, MVP 범위와 사용자 흐름
+- `docs/consolidated/02-데이터베이스_아키텍처_선택지.md`: 데이터베이스 구성안과 현재 선택 근거
+- `docs/consolidated/03-PostgreSQL_MVP_개발실행서.md`: Next.js, PostgreSQL, n8n 구현 기준
 - `AGENTS.md`: 저장소 작업 및 보안 지침

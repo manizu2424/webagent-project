@@ -4,14 +4,14 @@
 
 이 저장소는 WEBAGENT.KR MVP의 기획 문서와 Next.js App Router 기반 앱 골격을 포함합니다.
 
-- `1-WEBAGENT_KR_MVP_기획안.md`: 제품 포지셔닝, 타깃 고객, MVP 목표, 사용자 흐름.
-- `2-WEBAGENT_KR_MVP_DB_2가지_구성_기획서.md`: 데이터베이스 구성안과 관련 설계.
-- `3-WEBAGENT_KR_Codex_개발실행문서_PostgreSQL.md`: Next.js, PostgreSQL, n8n 기반 MVP 구현 기준.
+- `docs/consolidated/01-MVP_통합_제품기획서.md`: 제품 포지셔닝, 타깃 고객, 기능 범위, 사용자 흐름의 단일 기준.
+- `docs/consolidated/02-데이터베이스_아키텍처_선택지.md`: Supabase와 자체 PostgreSQL의 비교 및 선택 근거.
+- `docs/consolidated/03-PostgreSQL_MVP_개발실행서.md`: Next.js, PostgreSQL, n8n 기반 구현 기준.
 - `app/`: App Router 페이지와 향후 API routes.
 - `components/`: layout, landing, diagnosis, admin, ui 컴포넌트.
 - `lib/`, `db/`, `types/`, `docker/`: 공용 유틸, DB, 타입, 인프라 설정.
 
-주요 아키텍처 결정은 기존 기획 문서와 `README.md`의 개발 현황 및 다음 작업 목록과 일관되게 유지합니다.
+주요 아키텍처 결정은 `docs/consolidated/`의 통합 문서와 `README.md`의 개발 현황 및 다음 작업 목록과 일관되게 유지합니다.
 
 ## 빌드, 테스트, 개발 명령
 
