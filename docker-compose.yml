@@ -19,8 +19,45 @@ services:
       timeout: 5s
       retries: 5
 
+  webagent-n8n:
+    profiles: ["automation"]
+    image: docker.n8n.io/n8nio/n8n:2.37.10
+    container_name: webagent-n8n
+    restart: unless-stopped
+    environment:
+      N8N_HOST: 0.0.0.0
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      N8N_SECURE_COOKIE: "false"
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-change_this_local_encryption_key}
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      GENERIC_TIMEZONE: Asia/Seoul
+      TZ: Asia/Seoul
+      N8N_WEBHOOK_SECRET: ${N8N_WEBHOOK_SECRET:-change_this_webhook_secret}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-change_this_internal_secret}
+      WEBAGENT_CALLBACK_URL: ${WEBAGENT_CALLBACK_URL:-http://host.docker.internal:3000/api/internal/diagnosis-result}
+    ports:
+      - "127.0.0.1:${N8N_PORT:-5678}:5678"
+    volumes:
+      - webagent_n8n_data:/home/node/.n8n
+      - ./docker/n8n/workflows:/workflows:ro
+    networks:
+      - webagent-internal
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:5678/healthz >/dev/null 2>&1 || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
 volumes:
   webagent_postgres_data:
+  webagent_n8n_data:
 
 networks:
   webagent-internal:

@@ -1,0 +1,180 @@
+{
+  "id": "JQYlR9kR0Zx2webA",
+  "name": "WEBAGENT Diagnosis Local",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webagent-diagnosis",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "f8b7a5f1-2512-46d3-8d3b-e337473b30d1",
+      "name": "Diagnosis Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-760, 120],
+      "webhookId": "0bb1a967-389f-47bb-a172-f6cf6d0fac8a"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1ec37330-986b-4318-a01b-d56016a8b30a",
+              "leftValue": "={{ $json.headers['x-webhook-secret'] }}",
+              "rightValue": "={{ $env.N8N_WEBHOOK_SECRET }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f667b4da-dd16-4dfb-a915-29cfd3ad1b84",
+      "name": "Verify Webhook Secret",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-520, 120]
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $json.body ?? {};\nconst submission = payload.submission ?? {};\nconst taskNames = Array.isArray(submission.repetitiveTasks) && submission.repetitiveTasks.length > 0\n  ? submission.repetitiveTasks.slice(0, 3)\n  : ['반복 업무 정리'];\nconst dailyHours = Math.max(0, Math.min(24, Number(submission.dailyHours ?? 1)));\nconst toolCount = Array.isArray(submission.currentTools) ? submission.currentTools.length : 0;\nconst estimatedSavedHoursMin = Math.round(Math.min(744, dailyHours * 20 * 0.3));\nconst estimatedSavedHoursMax = Math.max(estimatedSavedHoursMin, Math.round(Math.min(744, dailyHours * 20 * 0.6)));\nconst automationScore = Math.max(0, Math.min(100, 48 + taskNames.length * 9 + toolCount * 3));\nconst recommendedTasks = taskNames.map((name, index) => ({\n  name,\n  reason: `${name} 업무는 반복 빈도와 수작업 시간을 기준으로 자동화 우선순위 ${index + 1}순위입니다.`,\n  difficulty: index === 0 ? 'LOW' : 'MEDIUM',\n  estimatedMonthlySavedHours: Math.max(1, Math.round(estimatedSavedHoursMin / taskNames.length)),\n}));\nreturn [{\n  json: {\n    diagnosisPublicId: payload.publicId,\n    automationScore,\n    recommendedTasks,\n    estimatedSavedHoursMin,\n    estimatedSavedHoursMax,\n    difficulty: recommendedTasks.some((task) => task.difficulty === 'MEDIUM') ? 'MEDIUM' : 'LOW',\n    recommendedStack: ['Next.js', 'n8n', 'PostgreSQL'],\n    implementationSteps: [\n      { order: 1, title: '업무 데이터 연결', description: '반복 업무 입력과 기존 도구의 데이터 흐름을 연결합니다.' },\n      { order: 2, title: '자동화 워크플로 구축', description: '검증 가능한 작은 단위부터 n8n 워크플로를 적용합니다.' },\n      { order: 3, title: '성과 확인', description: '처리 시간과 오류율을 측정해 자동화 범위를 조정합니다.' },\n    ],\n    aiSummary: `${submission.companyName ?? '귀사'}는 ${taskNames.join(', ')} 업무부터 자동화 가능성을 검증하는 것이 효과적입니다. 예상 절감 시간은 입력값을 기준으로 한 추정치입니다.`,\n    modelName: 'local-structured-analysis-v1',\n  },\n}];"
+      },
+      "id": "55f29d70-e7bd-46a0-a596-2ec86e83ca5f",
+      "name": "Build Local Structured Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-260, 20]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WEBAGENT_CALLBACK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-internal-api-secret",
+              "value": "={{ $env.INTERNAL_API_SECRET }}"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "89899d02-6fd3-4292-b026-84fe28dab7ef",
+      "name": "Save Diagnosis Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, 20]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, status: 'completed' } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "fae280a7-c288-48fc-a59d-68bb337c7b64",
+      "name": "Respond Completed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [260, 20]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, error: 'Unauthorized webhook request.' } }}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "c1e218d4-5907-4e51-8f67-2d07d776c176",
+      "name": "Respond Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [-260, 240]
+    }
+  ],
+  "connections": {
+    "Diagnosis Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify Webhook Secret",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Webhook Secret": {
+      "main": [
+        [
+          {
+            "node": "Build Local Structured Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Local Structured Analysis": {
+      "main": [
+        [
+          {
+            "node": "Save Diagnosis Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Diagnosis Result": {
+      "main": [
+        [
+          {
+            "node": "Respond Completed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "versionId": "215e9eea-5ca4-4a3b-85fa-7a1330ea2407",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

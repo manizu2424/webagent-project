@@ -3,29 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2, RefreshCw } from "lucide-react";
+import type { ApiResponse } from "@/lib/api/responses";
+import { shouldPollDiagnosis } from "@/lib/diagnosis/status";
+import type { PublicDiagnosisData } from "@/types/diagnosis";
 
-type DiagnosisResponse = {
-  ok: boolean;
-  data?: {
-    diagnosis: {
-      publicId: string;
-      status: "SUBMITTED" | "PROCESSING" | "COMPLETED" | "FAILED";
-      painPoint: string | null;
-      repetitiveTasks: string[];
-      lead: {
-        companyName: string;
-        contactName: string;
-      };
-      result: null | {
-        automationScore: number;
-        aiSummary: string | null;
-        recommendedTasks: Record<string, unknown>[];
-        recommendedStack: string[] | null;
-      };
-    };
-  };
-  error?: string;
-};
+type DiagnosisResponse = ApiResponse<PublicDiagnosisData>;
 
 export function ResultPanel({ publicId }: { publicId: string }) {
   const [data, setData] = useState<DiagnosisResponse | null>(null);
@@ -59,7 +41,7 @@ export function ResultPanel({ publicId }: { publicId: string }) {
 
     const status = data.data?.diagnosis.status;
 
-    if (status !== "SUBMITTED" && status !== "PROCESSING") {
+    if (!status || !shouldPollDiagnosis(status)) {
       return;
     }
 
@@ -97,9 +79,6 @@ export function ResultPanel({ publicId }: { publicId: string }) {
   }
 
   const diagnosis = data.data.diagnosis;
-  const isPending =
-    diagnosis.status === "SUBMITTED" || diagnosis.status === "PROCESSING";
-
   return (
     <div className="grid gap-6">
       <section className="rounded-lg border bg-card p-6 shadow-sm">
@@ -112,7 +91,15 @@ export function ResultPanel({ publicId }: { publicId: string }) {
         </p>
       </section>
 
-      {isPending ? (
+      {diagnosis.status === "SUBMITTED" ? (
+        <section className="rounded-lg border bg-card p-6">
+          <h2 className="text-xl font-bold">진단이 접수되었습니다.</h2>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            자동 분석 연결이 설정되지 않아 담당자가 제출 내용을 확인한 뒤
+            안내드릴 예정입니다.
+          </p>
+        </section>
+      ) : diagnosis.status === "PROCESSING" ? (
         <section className="rounded-lg border bg-card p-6">
           <RefreshCw className="h-6 w-6 animate-spin text-primary" />
           <h2 className="mt-4 text-xl font-bold">AI 분석을 기다리고 있습니다.</h2>

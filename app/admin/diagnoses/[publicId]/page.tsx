@@ -98,6 +98,38 @@ export default async function AdminDiagnosisDetailPage({
           {JSON.stringify(diagnosis.rawAnswers, null, 2)}
         </pre>
       </section>
+
+      <section className="mt-4 rounded-lg border bg-card p-5">
+        <h2 className="text-lg font-bold">자동화 실행 로그</h2>
+        {diagnosis.automationLogs.length > 0 ? (
+          <div className="mt-4 grid gap-3">
+            {diagnosis.automationLogs.map((log) => (
+              <div key={log.id} className="rounded-md border p-4 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold">
+                    {log.workflowName} · {log.status}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {log.createdAt.toLocaleString("ko-KR")}
+                  </p>
+                </div>
+                {log.errorMessage && (
+                  <p className="mt-2 text-sm text-red-700">
+                    {log.errorMessage}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-muted-foreground">
+            저장된 자동화 실행 로그가 없습니다.
+          </p>
+        )}
+        <p className="mt-4 text-xs leading-5 text-muted-foreground">
+          MVP에서는 실패 원인을 확인한 뒤 사용자에게 새 진단 제출을 안내합니다.
+        </p>
+      </section>
     </AdminShell>
   );
 }

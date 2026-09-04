@@ -9,6 +9,9 @@ import { diagnosisSubmissionSchema } from "@/lib/validators/diagnosis";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const WORKFLOW_FAILURE_MESSAGE =
+  "n8n webhook delivery failed after 2 attempts.";
+
 export async function POST(request: Request) {
   const rateLimit = checkRateLimit(request, "diagnosis", {
     limit: 10,
@@ -60,6 +63,8 @@ export async function POST(request: Request) {
       .returning();
 
     let n8nStatus: "delivered" | "skipped" | "failed" = "skipped";
+    let diagnosisStatus = diagnosis.status;
+    let automationErrorMessage: string | undefined;
 
     try {
       const workflowResult = await triggerDiagnosisWorkflow({
@@ -72,20 +77,33 @@ export async function POST(request: Request) {
       n8nStatus = workflowResult.status;
 
       if (workflowResult.status === "delivered") {
+        diagnosisStatus = "PROCESSING";
         await db
           .update(diagnoses)
-          .set({ status: "PROCESSING", updatedAt: new Date() })
+          .set({ status: diagnosisStatus, updatedAt: new Date() })
           .where(eq(diagnoses.id, diagnosis.id));
       }
     } catch (error) {
       n8nStatus = "failed";
-      console.error("n8n diagnosis webhook failed", error);
+      diagnosisStatus = "FAILED";
+      automationErrorMessage = WORKFLOW_FAILURE_MESSAGE;
+
+      await db
+        .update(diagnoses)
+        .set({ status: diagnosisStatus, updatedAt: new Date() })
+        .where(eq(diagnoses.id, diagnosis.id));
+
+      console.error(
+        "n8n diagnosis webhook failed",
+        error instanceof Error ? error.name : "UnknownError",
+      );
     }
 
     await db.insert(automationLogs).values({
       diagnosisId: diagnosis.id,
       workflowName: "diagnosis-analysis",
       status: n8nStatus,
+      errorMessage: automationErrorMessage,
       startedAt: new Date(),
       finishedAt: new Date(),
     });
@@ -93,7 +111,7 @@ export async function POST(request: Request) {
     return apiOk(
       {
         publicId: diagnosis.publicId,
-        status: n8nStatus === "delivered" ? "PROCESSING" : diagnosis.status,
+        status: diagnosisStatus,
         n8nStatus,
       },
       201,
