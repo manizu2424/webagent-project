@@ -29,11 +29,14 @@ export function ConsultationForm({
     setStatus("loading");
     setError("");
 
+    const diagnosisPublicId = form.diagnosisPublicId.trim();
+
     const response = await fetch("/api/consultation", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         ...form,
+        diagnosisPublicId: diagnosisPublicId || undefined,
         preferredDate: form.preferredDate || undefined,
       }),
     });

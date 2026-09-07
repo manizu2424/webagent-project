@@ -1,10 +1,13 @@
 import { z } from "zod";
 import { diagnosisPublicIdSchema } from "./diagnosis";
-import { optionalDate, optionalString } from "./shared";
+import { blankToUndefined, optionalDate, optionalString } from "./shared";
 
 export const consultationSubmissionSchema = z
   .object({
-    diagnosisPublicId: diagnosisPublicIdSchema.optional(),
+    diagnosisPublicId: z.preprocess(
+      blankToUndefined,
+      diagnosisPublicIdSchema.optional(),
+    ),
     companyName: optionalString(200),
     contactName: optionalString(100),
     email: optionalString(255).refine(

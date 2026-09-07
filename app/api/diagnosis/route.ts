@@ -1,10 +1,14 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { apiError, apiOk, parseJsonBody } from "@/lib/api/responses";
 import { getDb } from "@/db";
 import { automationLogs, diagnoses, leads } from "@/db/schema";
-import { triggerDiagnosisWorkflow } from "@/lib/n8n/diagnosis";
+import {
+  isDiagnosisWorkflowConfigured,
+  triggerDiagnosisWorkflow,
+} from "@/lib/n8n/diagnosis";
 import { checkRateLimit } from "@/lib/security/rate-limit";
 import { diagnosisSubmissionSchema } from "@/lib/validators/diagnosis";
+import { logServerError, serverErrorResponse } from "@/lib/api/server-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -63,8 +67,19 @@ export async function POST(request: Request) {
       .returning();
 
     let n8nStatus: "delivered" | "skipped" | "failed" = "skipped";
-    let diagnosisStatus = diagnosis.status;
     let automationErrorMessage: string | undefined;
+
+    if (isDiagnosisWorkflowConfigured()) {
+      await db
+        .update(diagnoses)
+        .set({ status: "PROCESSING", updatedAt: new Date() })
+        .where(
+          and(
+            eq(diagnoses.id, diagnosis.id),
+            eq(diagnoses.status, "SUBMITTED"),
+          ),
+        );
+    }
 
     try {
       const workflowResult = await triggerDiagnosisWorkflow({
@@ -75,28 +90,23 @@ export async function POST(request: Request) {
       });
 
       n8nStatus = workflowResult.status;
-
-      if (workflowResult.status === "delivered") {
-        diagnosisStatus = "PROCESSING";
-        await db
-          .update(diagnoses)
-          .set({ status: diagnosisStatus, updatedAt: new Date() })
-          .where(eq(diagnoses.id, diagnosis.id));
-      }
     } catch (error) {
       n8nStatus = "failed";
-      diagnosisStatus = "FAILED";
       automationErrorMessage = WORKFLOW_FAILURE_MESSAGE;
 
       await db
         .update(diagnoses)
-        .set({ status: diagnosisStatus, updatedAt: new Date() })
-        .where(eq(diagnoses.id, diagnosis.id));
+        .set({ status: "FAILED", updatedAt: new Date() })
+        .where(
+          and(
+            eq(diagnoses.id, diagnosis.id),
+            eq(diagnoses.status, "PROCESSING"),
+          ),
+        );
 
-      console.error(
-        "n8n diagnosis webhook failed",
-        error instanceof Error ? error.name : "UnknownError",
-      );
+      logServerError("diagnosis.workflow_delivery_failed", error, {
+        diagnosisId: diagnosis.id,
+      });
     }
 
     await db.insert(automationLogs).values({
@@ -108,17 +118,29 @@ export async function POST(request: Request) {
       finishedAt: new Date(),
     });
 
+    const finalDiagnosis = await db.query.diagnoses.findFirst({
+      columns: { status: true },
+      where: eq(diagnoses.id, diagnosis.id),
+    });
+
+    if (!finalDiagnosis) {
+      throw new Error("Saved diagnosis not found.");
+    }
+
     return apiOk(
       {
         publicId: diagnosis.publicId,
-        status: diagnosisStatus,
+        status: finalDiagnosis.status,
         n8nStatus,
       },
       201,
     );
   } catch (error) {
-    console.error("Diagnosis submission failed", error);
-
-    return apiError("Failed to submit diagnosis.", 500);
+    return serverErrorResponse(
+      "Failed to submit diagnosis.",
+      500,
+      "diagnosis.submission_failed",
+      error,
+    );
   }
 }

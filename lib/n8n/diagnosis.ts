@@ -7,6 +7,10 @@ type TriggerDiagnosisWorkflowInput = {
   submission: DiagnosisSubmissionInput;
 };
 
+export function isDiagnosisWorkflowConfigured() {
+  return Boolean(process.env.N8N_DIAGNOSIS_WEBHOOK_URL);
+}
+
 export async function triggerDiagnosisWorkflow(
   payload: TriggerDiagnosisWorkflowInput,
 ) {

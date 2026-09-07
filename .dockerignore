@@ -1,0 +1,42 @@
+# Version control and local agent metadata
+.git
+.gitignore
+.agents
+.codex
+
+# Dependencies and generated output
+node_modules
+.next
+out
+build
+dist
+coverage
+
+# Environment files and local secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Local databases, volumes, and logs
+*.sqlite
+*.sqlite3
+docker-data
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor and operating-system files
+.DS_Store
+.idea
+.vscode
+
+# Files that are not required to build the application image
+docs
+task.md
+AGENTS.md
+**/*.test.ts
+**/*.test.tsx
+vitest.config.*

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-function blankToUndefined(value: unknown) {
+export function blankToUndefined(value: unknown) {
   if (typeof value === "string" && value.trim() === "") {
     return undefined;
   }

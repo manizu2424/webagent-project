@@ -1,5 +1,6 @@
 import { checkDatabaseConnection } from "@/db";
-import { apiError, apiOk } from "@/lib/api/responses";
+import { apiOk } from "@/lib/api/responses";
+import { serverErrorResponse } from "@/lib/api/server-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,8 +15,11 @@ export async function GET() {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("Health check failed", error);
-
-    return apiError("Health check failed.", 503);
+    return serverErrorResponse(
+      "Health check failed.",
+      503,
+      "health.database_check_failed",
+      error,
+    );
   }
 }

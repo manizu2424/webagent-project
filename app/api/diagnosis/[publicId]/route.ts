@@ -3,6 +3,7 @@ import { apiError, apiOk } from "@/lib/api/responses";
 import { getDb } from "@/db";
 import { diagnosisPublicIdSchema } from "@/lib/validators/diagnosis";
 import { diagnoses } from "@/db/schema";
+import { serverErrorResponse } from "@/lib/api/server-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -82,8 +83,11 @@ export async function GET(_request: Request, context: RouteContext) {
       },
     });
   } catch (error) {
-    console.error("Diagnosis lookup failed", error);
-
-    return apiError("Failed to load diagnosis.", 500);
+    return serverErrorResponse(
+      "Failed to load diagnosis.",
+      500,
+      "diagnosis.lookup_failed",
+      error,
+    );
   }
 }

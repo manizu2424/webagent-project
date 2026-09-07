@@ -147,7 +147,7 @@ n8n 호출 실패 시 원본은 보존하고 상태·재시도 가능 이벤트�
 - 외부 입력은 모두 서버에서 검증하고 진단·상담 API에 rate limit을 둔다.
 - 로그는 `requestId`, `diagnosisId`, 이벤트, 상태, 시간만 기록한다.
 - 이메일, 전화번호, 이름, raw answers, secret, stack trace를 로그·응답에 노출하지 않는다.
-- 관리자 비밀번호는 bcrypt 또는 argon2 해시만 저장한다.
+- 관리자 비밀번호는 Argon2id 해시만 저장하며 salt 없는 SHA-256 값은 허용하지 않는다. 해시는 저장소 밖의 환경 설정에 보관한다.
 - 보안 헤더, 오류 경계, 404, 로딩 상태를 구성한다.
 - 개인정보 수집 목적, 항목, 보관 기간, 파기 방식, 동의를 고지한다. 최종 법률 문구는 사업 환경에 맞게 별도 검토한다.
 
@@ -163,6 +163,9 @@ Cloudflare → Nginx Proxy Manager → webagent-app:3000
 - 보관 기준은 일간 7일, 주간 4주, 월간 6개월이다.
 - 월 1회 실제 복원 테스트를 하고 결과를 기록한다.
 - Docker healthcheck, app health endpoint, 백업 실패 Telegram 알림을 둔다.
+- production 이미지는 `.dockerignore`로 `.env*`, 로컬 `.next`, `node_modules`, Git 메타데이터와 개발 전용 파일을 제외한 컨텍스트에서 빌드한다.
+- 서버 secret은 이미지나 build argument에 저장하지 않고, 저장소 밖에서 관리하는 환경 파일 또는 배포 플랫폼의 secret 저장소를 통해 컨테이너 실행 시 주입한다.
+- 배포 전 최종 이미지 파일 시스템에 실제 환경 파일이 없는지 검사한다.
 - 배포 전 migration과 롤백·복구 절차를 확인한다.
 
 ## 11. 구현 Phase와 완료 조건
@@ -180,7 +183,7 @@ Cloudflare → Nginx Proxy Manager → webagent-app:3000
 | 8 | 보안·QA | rate limit, 로그 점검, 오류 UI |
 | 9 | 배포·백업 | SSL, DB 비공개, 백업·복원 검증 |
 
-각 Phase가 끝날 때 `npm run lint`, TypeScript 검사, `npm run build`를 실행한다. 테스트 스크립트가 도입되기 전에는 존재하지 않는 `npm test`를 사용하지 않는다.
+각 Phase가 끝날 때 `npm run lint`, `npm run test`, `npm run build`를 실행한다. 현재 기준 Vitest 테스트는 12개 파일·49개이며 핵심 API, 인증, 상태 전이와 보안 회귀를 검증한다.
 
 ## 12. 검증 우선순위
 
@@ -204,4 +207,3 @@ Cloudflare → Nginx Proxy Manager → webagent-app:3000
 - [ ] 외부 백업과 복원 테스트
 - [ ] Docker production build
 - [ ] lint, typecheck, build와 핵심 흐름 검증
-

@@ -127,16 +127,47 @@ PostgreSQL은 로컬 개발 편의를 위해 `127.0.0.1:5432`에만 바인딩됩
 | `INTERNAL_API_SECRET` | 분석 결과 수신 API 인증 secret |
 | `AUTH_SECRET` | 관리자 세션 서명 secret |
 | `ADMIN_EMAIL` | 관리자 로그인 이메일 |
-| `ADMIN_PASSWORD_HASH` | SHA-256 관리자 비밀번호 해시 |
+| `ADMIN_PASSWORD_HASH` | Argon2id 관리자 비밀번호 해시 |
 | `NEXT_PUBLIC_SITE_URL` | 공개 사이트 기본 URL |
 
-관리자 비밀번호 해시는 다음 명령으로 생성합니다.
+관리자 비밀번호 해시는 다음 순서로 생성합니다. 비밀번호 입력은 화면과 shell history에 표시되지 않으며, 출력된 `$argon2id$...` 전체 값을 `ADMIN_PASSWORD_HASH`로 설정합니다.
 
 ```bash
-node -e "const crypto=require('crypto'); console.log('sha256:'+crypto.createHash('sha256').update('your-password').digest('hex'))"
+read -s ADMIN_PASSWORD
+export ADMIN_PASSWORD
+npm run auth:hash-password
+unset ADMIN_PASSWORD
 ```
 
+기존 `sha256:...` 값은 더 이상 로그인에 사용할 수 없습니다. 배포 전에 위 명령으로 새 해시를 생성해 저장소 밖의 환경 설정을 교체해야 합니다.
+
 `.env`, DB 인증 정보, API 키, Telegram 토큰, n8n 인증 정보는 커밋하지 않습니다. 서버 전용 비밀값에는 `NEXT_PUBLIC_` 접두사를 사용하지 않습니다.
+
+### Production Docker 이미지와 환경 변수
+
+Docker 이미지는 실제 환경 파일 없이 빌드합니다. 저장소 루트의 `.dockerignore`가 `.env*`, 기존 `.next`, 로컬 `node_modules`, Git 메타데이터와 개발 전용 파일을 빌드 컨텍스트에서 제외합니다.
+
+```bash
+docker build --tag webagent:local .
+```
+
+서버 전용 설정과 secret은 이미지 빌드 인자나 Dockerfile에 넣지 않고 컨테이너 실행 시 주입합니다. 아래 환경 파일은 저장소 밖에서 생성하고 소유자만 읽을 수 있도록 관리합니다.
+
+```bash
+docker run --rm --init \
+  --publish 3000:3000 \
+  --env-file /absolute/path/to/webagent.production.env \
+  webagent:local
+```
+
+배포 전에는 이미지 파일 시스템에 환경 파일이 없는지 확인합니다. 명령이 아무 경로도 출력하지 않아야 합니다.
+
+```bash
+docker run --rm --entrypoint sh webagent:local -c \
+  'find /app -type f \( -name ".env" -o -name ".env.*" \) -print'
+```
+
+운영 Compose의 앱 서비스와 내부 DB 연결, healthcheck 구성은 별도 배포 작업에서 추가합니다. Docker 런타임 환경 변수는 Docker 데몬 권한이 있는 사용자에게 조회될 수 있으므로 호스트와 배포 계정 접근도 제한해야 합니다.
 
 ## 검증
 
@@ -146,7 +177,7 @@ npm run test
 npm run build
 ```
 
-2026-09-01 로컬 검증 기준으로 ESLint, Vitest 20개 테스트, Next.js production build가 모두 통과했습니다. PostgreSQL 컨테이너, migration, `/` 및 `/api/health`의 HTTP 200 응답도 확인했습니다.
+2026-09-07 로컬 검증 기준으로 ESLint, Vitest 12개 파일·49개 테스트, Next.js production build가 모두 통과했습니다. PostgreSQL migration, 독립 상담 저장, n8n 로컬 분석 callback 왕복과 production 컨테이너의 Argon2id 관리자 로그인을 실제 HTTP로 확인했습니다.
 
 ## 개발 현황
 
@@ -163,18 +194,30 @@ npm run build
 - [x] 개인정보처리방침 및 기본 보안·오류 처리
 - [x] lint, unit test, production build
 
-### 다음 작업
+### 개선 및 출시 작업
 
 작업은 아래 순서로 진행합니다.
 
+#### 우선 개선 순서
+
+- [x] R1: Docker 빌드 컨텍스트와 이미지의 환경 파일 제외
+- [x] R2: 독립 상담의 빈 진단 ID 정규화
+- [x] R3: n8n callback과 제출 API 상태 경합 제거
+- [x] R4: Argon2id 관리자 인증과 로그인 반복 시도 제한
+- [x] R5: 개인정보·SQL 매개변수를 출력하지 않는 서버 오류 로그
+- [ ] R6: 핵심 저장 transaction, 중복 제출 방지와 로그 실패 정책
+- [ ] R7·R8: 네트워크 오류 복구와 관리자 상담 상세·페이지 이동
+- [ ] R9·R10: AI 결과 검증 강화와 운영 프록시·rate limit 보완
+
 #### 1. n8n 및 AI 분석 연결
 
-- [ ] n8n 진단 수신 Webhook과 `x-webhook-secret` 검증 설정
-- [ ] `.env`에 n8n URL과 secret 설정
-- [ ] 진단 제출 시 `n8nStatus: "delivered"` 및 실패 시 DB 보존 확인
-- [ ] AI structured output 필드 확정 및 생성
-- [ ] n8n에서 `/api/internal/diagnosis-result` callback 연결
-- [ ] 결과 저장 후 결과 페이지의 `COMPLETED` 상태 확인
+- [x] n8n 진단 수신 Webhook과 `x-webhook-secret` 검증 설정
+- [x] 로컬 `.env`에 n8n URL과 secret 설정
+- [x] 진단 제출 시 `n8nStatus: "delivered"` 및 실패 시 DB 보존 확인
+- [x] 로컬 분석용 structured output 필드 확정 및 생성
+- [x] n8n에서 `/api/internal/diagnosis-result` callback 연결
+- [x] 결과 저장 후 공개 결과 API의 `COMPLETED` 상태 확인
+- [ ] 로컬 분석 노드를 운영용 실제 AI 모델과 credential로 교체
 
 AI 결과에는 최소한 `diagnosisPublicId`, `automationScore`, `recommendedTasks`, `estimatedSavedHoursMin`, `estimatedSavedHoursMax`, `difficulty`, `recommendedStack`, `implementationSteps`, `aiSummary`, `modelName`을 포함합니다.
 
@@ -196,7 +239,7 @@ AI 결과에는 최소한 `diagnosisPublicId`, `automationScore`, `recommendedTa
 
 #### 4. 핵심 E2E 테스트
 
-- [ ] 진단 제출 → PostgreSQL 저장 → n8n 호출
+- [x] 진단 제출 → PostgreSQL 저장 → n8n 로컬 workflow 호출
 - [ ] AI 결과 저장 → 결과 페이지 표시
 - [ ] 상담 신청 저장 → Telegram 알림
 - [ ] 관리자 페이지의 진단 및 상담 조회
@@ -211,8 +254,8 @@ AI 결과에는 최소한 `diagnosisPublicId`, `automationScore`, `recommendedTa
 - [x] 개인정보처리방침
 - [x] PostgreSQL 로컬 포트 제한
 - [x] lint, test, build 통과
-- [ ] 실제 n8n Webhook 왕복
-- [ ] AI structured output 및 결과 DB 저장 실사용 검증
+- [x] 실제 n8n Webhook 및 로컬 분석 callback 왕복
+- [x] 로컬 structured output 및 결과 DB 저장 검증
 - [ ] Telegram 관리자 알림
 - [ ] 운영 Docker image 실행
 - [ ] 도메인 및 HTTPS 연결

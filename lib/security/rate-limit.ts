@@ -28,13 +28,17 @@ function getClientIp(request: Request) {
   );
 }
 
+function getRateLimitKey(request: Request, bucket: string) {
+  return `${bucket}:${getClientIp(request)}`;
+}
+
 export function checkRateLimit(
   request: Request,
   bucket: string,
   options: RateLimitOptions,
 ) {
   const now = Date.now();
-  const key = `${bucket}:${getClientIp(request)}`;
+  const key = getRateLimitKey(request, bucket);
   const store = getStore();
   const current = store.get(key);
 
@@ -58,4 +62,8 @@ export function checkRateLimit(
   store.set(key, current);
 
   return { ok: true } as const;
+}
+
+export function resetRateLimit(request: Request, bucket: string) {
+  getStore().delete(getRateLimitKey(request, bucket));
 }

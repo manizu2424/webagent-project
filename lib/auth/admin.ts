@@ -1,4 +1,5 @@
-import { createHash, createHmac, timingSafeEqual } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
+import { argon2id, hash, verify } from "argon2";
 import { cookies } from "next/headers";
 
 const SESSION_COOKIE = "webagent_admin_session";
@@ -9,8 +10,15 @@ export type AdminSession = {
   expiresAt: number;
 };
 
+const ADMIN_PASSWORD_HASH_OPTIONS = {
+  type: argon2id,
+  memoryCost: 19_456,
+  timeCost: 2,
+  parallelism: 1,
+} as const;
+
 export function hashAdminPassword(password: string) {
-  return `sha256:${createHash("sha256").update(password).digest("hex")}`;
+  return hash(password, ADMIN_PASSWORD_HASH_OPTIONS);
 }
 
 function safeCompare(value: string, expected: string) {
@@ -29,25 +37,32 @@ function getAuthSecret() {
 }
 
 export function isAdminAuthConfigured() {
+  const passwordHash = process.env.ADMIN_PASSWORD_HASH;
+
   return Boolean(
     process.env.ADMIN_EMAIL &&
-      process.env.ADMIN_PASSWORD_HASH &&
+      passwordHash?.startsWith("$argon2id$") &&
       process.env.AUTH_SECRET,
   );
 }
 
-export function verifyAdminCredentials(email: string, password: string) {
+export async function verifyAdminCredentials(email: string, password: string) {
   const expectedEmail = process.env.ADMIN_EMAIL;
   const expectedHash = process.env.ADMIN_PASSWORD_HASH;
 
-  if (!expectedEmail || !expectedHash) {
+  if (!expectedEmail || !expectedHash?.startsWith("$argon2id$")) {
     return false;
   }
 
-  return (
-    safeCompare(email, expectedEmail) &&
-    safeCompare(hashAdminPassword(password), expectedHash)
-  );
+  const emailMatches = safeCompare(email, expectedEmail);
+
+  try {
+    const passwordMatches = await verify(expectedHash, password);
+
+    return emailMatches && passwordMatches;
+  } catch {
+    return false;
+  }
 }
 
 function signPayload(payload: string) {

@@ -20,9 +20,10 @@ workflow import 후 n8n을 재시작하고 `http://localhost:5679/webhook/webage
 - n8n → Next.js: `x-internal-api-secret`
 - 두 secret은 `.env`에서만 주입하며 workflow JSON에 저장하지 않습니다.
 - Webhook secret이 일치하지 않으면 callback을 호출하지 않고 HTTP 401을 반환합니다.
+- 로컬 workflow의 IF·HTTP 노드가 위 환경 변수를 읽을 수 있도록 Compose에서 `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`를 사용합니다. n8n 포트는 `127.0.0.1`에만 바인딩하고 로컬 검증 용도로만 사용합니다.
 
 ## 실제 AI 모델 연결
 
 현재 `Build Local Structured Analysis` 노드는 외부 AI 키 없이 전체 왕복을 검증하기 위한 결정론적 로컬 분석기입니다. 운영 전에는 이 노드를 OpenAI 또는 Gemini 호출과 structured output parser로 교체하되, callback JSON은 `lib/validators/diagnosis-result.ts` 계약을 그대로 따라야 합니다.
 
-AI credential은 n8n credential store에만 저장하고 workflow JSON이나 Next.js 환경 변수에 넣지 않습니다.
+AI credential은 n8n credential store에만 저장하고 workflow JSON이나 Next.js 환경 변수에 넣지 않습니다. 운영 환경에서는 노드의 전체 환경 변수 접근을 허용하지 않고 n8n credential 또는 별도 secret 저장소로 Webhook·callback 인증값도 이전합니다.

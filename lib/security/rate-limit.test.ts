@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkRateLimit } from "./rate-limit";
+import { checkRateLimit, resetRateLimit } from "./rate-limit";
 
 describe("checkRateLimit", () => {
   it("allows requests within the limit", () => {
@@ -26,5 +26,19 @@ describe("checkRateLimit", () => {
 
     expect(checkRateLimit(request, "test-blocked", { limit: 1, windowMs: 1000 }))
       .toMatchObject({ ok: false });
+  });
+
+  it("allows requests again after the bucket is reset", () => {
+    const request = new Request("http://localhost/api", {
+      headers: {
+        "x-real-ip": "rate-test-reset",
+      },
+    });
+
+    checkRateLimit(request, "test-reset", { limit: 1, windowMs: 1000 });
+    resetRateLimit(request, "test-reset");
+
+    expect(checkRateLimit(request, "test-reset", { limit: 1, windowMs: 1000 }))
+      .toMatchObject({ ok: true });
   });
 });

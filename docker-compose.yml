@@ -32,6 +32,7 @@ services:
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-change_this_local_encryption_key}
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
       GENERIC_TIMEZONE: Asia/Seoul
       TZ: Asia/Seoul
       N8N_WEBHOOK_SECRET: ${N8N_WEBHOOK_SECRET:-change_this_webhook_secret}

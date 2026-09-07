@@ -20,12 +20,14 @@
 - `npm install`: 프로젝트 의존성 설치.
 - `npm run dev`: 로컬 Next.js 개발 서버 실행.
 - `npm run lint`: ESLint 검사 실행.
+- `npm run test`: Vitest 전체 테스트 실행.
 - `npm run build`: webpack 기반 Next.js 프로덕션 빌드 생성.
+- `npm run auth:hash-password`: `ADMIN_PASSWORD` 환경 변수에서 Argon2id 관리자 비밀번호 해시 생성.
 - `docker compose up -d`: 로컬 PostgreSQL 컨테이너 실행.
 - `npm run db:generate`: Drizzle migration 생성.
 - `npm run db:migrate`: Drizzle migration 적용.
 
-테스트 스크립트는 아직 없습니다. 테스트 도구가 도입되기 전까지 `npm test`를 사용하지 않습니다.
+현재 Vitest 테스트가 구성되어 있습니다. 변경 범위 테스트를 먼저 실행하고 완료 전 `npm run lint`, `npm run test`, `npm run build`를 모두 확인합니다.
 
 ## 코딩 스타일 및 이름 규칙
 
@@ -35,11 +37,11 @@
 
 ## 테스트 지침
 
-아직 테스트 프레임워크는 설정되어 있지 않습니다. 코드가 추가되면 핵심 MVP 흐름을 중심으로 테스트를 작성합니다. 대상은 진단 폼 제출, PostgreSQL 저장, n8n Webhook 호출, 분석 결과 조회, 상담 신청, 관리자 접근 제어입니다. 테스트 파일은 동작 기준으로 이름을 짓습니다. 예: `diagnosis-form-submits-valid-request.test.ts`.
+Vitest를 사용하며 테스트 파일은 `*.test.ts`로 작성합니다. 핵심 대상은 진단 제출과 상태 전이, PostgreSQL 저장, n8n Webhook·callback, 분석 결과 조회, 상담 신청, 관리자 인증과 접근 제어입니다. 외부 연동은 단위 테스트에서 mock하고 주요 흐름은 로컬 통합 검증으로 보완합니다.
 
 ## 커밋 및 풀 리퀘스트 지침
 
-현재 디렉터리는 Git 저장소로 초기화되어 있지 않아 로컬 커밋 규칙을 추론할 수 없습니다. Git을 사용하게 되면 `Add diagnosis form schema`, `Document PostgreSQL deployment flow`처럼 짧은 명령형 커밋 메시지를 사용합니다.
+Git 커밋은 `Add diagnosis form schema`, `Document PostgreSQL deployment flow`처럼 짧은 명령형 메시지를 사용합니다. 기존 사용자 변경을 보존하고 작업과 무관한 파일을 함께 수정하거나 되돌리지 않습니다.
 
 풀 리퀘스트에는 간단한 요약, 영향을 받는 MVP 영역, 검증 절차, 연결된 이슈 또는 작업, UI 변경 시 스크린샷을 포함합니다.
 

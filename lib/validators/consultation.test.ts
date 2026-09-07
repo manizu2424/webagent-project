@@ -15,6 +15,26 @@ describe("consultationSubmissionSchema", () => {
 
   it("accepts a standalone consultation with contact fields", () => {
     const result = consultationSubmissionSchema.safeParse({
+      diagnosisPublicId: "",
+      companyName: "테스트 회사",
+      contactName: "테스트 담당자",
+      email: "contact@example.com",
+      phone: "",
+      preferredDate: undefined,
+      consultationType: "online",
+      message: "",
+      privacyConsent: true,
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.diagnosisPublicId).toBeUndefined();
+    }
+  });
+
+  it("normalizes a whitespace-only diagnosis ID for a standalone consultation", () => {
+    const result = consultationSubmissionSchema.safeParse({
+      diagnosisPublicId: "   ",
       companyName: "테스트 회사",
       contactName: "테스트 담당자",
       email: "contact@example.com",
@@ -22,6 +42,21 @@ describe("consultationSubmissionSchema", () => {
     });
 
     expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.diagnosisPublicId).toBeUndefined();
+    }
+  });
+
+  it("rejects a non-empty invalid diagnosis ID", () => {
+    const result = consultationSubmissionSchema.safeParse({
+      diagnosisPublicId: "not-a-uuid",
+      companyName: "테스트 회사",
+      contactName: "테스트 담당자",
+      email: "contact@example.com",
+      privacyConsent: true,
+    });
+
+    expect(result.success).toBe(false);
   });
 
   it("rejects an empty consultation request", () => {

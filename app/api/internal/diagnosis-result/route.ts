@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { diagnoses, diagnosisResults } from "@/db/schema";
 import { verifyInternalApiSecret } from "@/lib/security/internal-secret";
 import { diagnosisResultSubmissionSchema } from "@/lib/validators/diagnosis-result";
+import { serverErrorResponse } from "@/lib/api/server-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -81,8 +82,11 @@ export async function POST(request: Request) {
       status: "COMPLETED",
     });
   } catch (error) {
-    console.error("Diagnosis result update failed", error);
-
-    return apiError("Failed to save diagnosis result.", 500);
+    return serverErrorResponse(
+      "Failed to save diagnosis result.",
+      500,
+      "diagnosis_result.save_failed",
+      error,
+    );
   }
 }

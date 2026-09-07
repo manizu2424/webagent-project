@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { consultations, diagnoses, leads } from "@/db/schema";
 import { checkRateLimit } from "@/lib/security/rate-limit";
 import { consultationSubmissionSchema } from "@/lib/validators/consultation";
+import { serverErrorResponse } from "@/lib/api/server-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -80,8 +81,11 @@ export async function POST(request: Request) {
       201,
     );
   } catch (error) {
-    console.error("Consultation submission failed", error);
-
-    return apiError("Failed to submit consultation.", 500);
+    return serverErrorResponse(
+      "Failed to submit consultation.",
+      500,
+      "consultation.submission_failed",
+      error,
+    );
   }
 }
