@@ -45,6 +45,9 @@ export const leads = pgTable("leads", {
 export const diagnoses = pgTable("diagnoses", {
   id: uuid("id").defaultRandom().primaryKey(),
   publicId: uuid("public_id").defaultRandom().notNull().unique(),
+  idempotencyKey: uuid("idempotency_key").notNull().unique(),
+  submissionFingerprint: varchar("submission_fingerprint", { length: 64 })
+    .notNull(),
   leadId: uuid("lead_id")
     .notNull()
     .references(() => leads.id, { onDelete: "cascade" }),
@@ -102,6 +105,9 @@ export const diagnosisResults = pgTable("diagnosis_results", {
 
 export const consultations = pgTable("consultations", {
   id: uuid("id").defaultRandom().primaryKey(),
+  idempotencyKey: uuid("idempotency_key").notNull().unique(),
+  submissionFingerprint: varchar("submission_fingerprint", { length: 64 })
+    .notNull(),
   leadId: uuid("lead_id")
     .notNull()
     .references(() => leads.id, { onDelete: "cascade" }),

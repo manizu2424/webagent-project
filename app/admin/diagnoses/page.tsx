@@ -1,32 +1,44 @@
 import Link from "next/link";
-import { desc } from "drizzle-orm";
+import { count, desc } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { AdminShell } from "@/components/admin/admin-shell";
 import { getDb } from "@/db";
 import { diagnoses } from "@/db/schema";
 import { getAdminSession } from "@/lib/auth/admin";
+import { AdminPagination } from "@/components/admin/pagination";
+import { ADMIN_PAGE_SIZE, getTotalPages, parsePage } from "@/lib/pagination";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminDiagnosesPage() {
+export default async function AdminDiagnosesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string | string[] }>;
+}) {
   const session = await getAdminSession();
 
   if (!session) {
     redirect("/admin/login");
   }
 
-  const rows = await getDb().query.diagnoses.findMany({
+  const requestedPage = parsePage((await searchParams).page);
+  const db = getDb();
+  const [{ total }] = await db.select({ total: count() }).from(diagnoses);
+  const totalPages = getTotalPages(total);
+  const currentPage = Math.min(requestedPage, totalPages);
+  const rows = await db.query.diagnoses.findMany({
     with: {
       lead: true,
       result: true,
     },
     orderBy: [desc(diagnoses.createdAt)],
-    limit: 50,
+    limit: ADMIN_PAGE_SIZE,
+    offset: (currentPage - 1) * ADMIN_PAGE_SIZE,
   });
 
   return (
     <AdminShell title="진단 목록">
-      <div className="overflow-hidden rounded-lg border bg-card">
+      <div className="overflow-x-auto rounded-lg border bg-card">
         <table className="w-full min-w-[760px] border-collapse text-left text-sm">
           <thead className="bg-muted">
             <tr>
@@ -61,6 +73,11 @@ export default async function AdminDiagnosesPage() {
           </tbody>
         </table>
       </div>
+      <AdminPagination
+        basePath="/admin/diagnoses"
+        currentPage={currentPage}
+        totalPages={totalPages}
+      />
     </AdminShell>
   );
 }

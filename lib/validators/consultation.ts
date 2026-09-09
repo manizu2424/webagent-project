@@ -30,6 +30,17 @@ export const consultationSubmissionSchema = z
       message:
         "diagnosisPublicId or companyName, contactName, and email are required.",
     },
+  )
+  .transform((value) =>
+    value.diagnosisPublicId
+      ? {
+          ...value,
+          companyName: undefined,
+          contactName: undefined,
+          email: undefined,
+          phone: undefined,
+        }
+      : value,
   );
 
 export type ConsultationSubmissionInput = z.infer<

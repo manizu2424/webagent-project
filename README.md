@@ -40,18 +40,20 @@ n8n URL이 설정되지 않은 로컬 환경에서는 진단 데이터만 저장
 | `/admin/diagnoses` | 관리자 진단 목록 |
 | `/admin/diagnoses/[publicId]` | 관리자 진단 상세 |
 | `/admin/consultations` | 관리자 상담 목록 |
+| `/admin/consultations/[id]` | 관리자 상담 상세·상태·메모 관리 |
 
 ### API
 
 | 메서드 및 경로 | 기능 |
 | --- | --- |
 | `GET /api/health` | 앱 및 DB 연결 상태 확인 |
-| `POST /api/diagnosis` | 진단 제출 저장 및 n8n 호출 |
+| `POST /api/diagnosis` | 멱등 키 기반 진단 제출 저장 및 n8n 호출 |
 | `GET /api/diagnosis/[publicId]` | 공개 ID로 진단 결과 조회 |
-| `POST /api/consultation` | 상담 신청 저장 |
+| `POST /api/consultation` | 멱등 키 기반 상담 신청 저장 |
 | `POST /api/internal/diagnosis-result` | n8n 분석 결과 저장 |
 
 API 응답은 `{ ok: boolean, data?: unknown, error?: string }` 형식을 사용합니다.
+두 공개 제출 API는 UUID 형식의 `Idempotency-Key` 요청 헤더를 필수로 사용합니다. 같은 키와 같은 요청을 재전송하면 새 행을 만들지 않고 기존 리소스를 반환하며, 같은 키에 다른 요청 내용이 오면 409를 반환합니다.
 
 ### 데이터 및 보안
 
@@ -62,6 +64,7 @@ API 응답은 `{ ok: boolean, data?: unknown, error?: string }` 형식을 사용
 - 공개 POST API in-memory rate limit
 - security headers, error boundary, 404 페이지
 - validation, health API, internal secret, rate limit, admin auth 테스트
+- 진단·독립 상담의 핵심 저장 transaction 및 제출 중복 방지
 
 ## 로컬 개발
 
@@ -129,6 +132,9 @@ PostgreSQL은 로컬 개발 편의를 위해 `127.0.0.1:5432`에만 바인딩됩
 | `ADMIN_EMAIL` | 관리자 로그인 이메일 |
 | `ADMIN_PASSWORD_HASH` | Argon2id 관리자 비밀번호 해시 |
 | `NEXT_PUBLIC_SITE_URL` | 공개 사이트 기본 URL |
+| `RATE_LIMIT_TRUST_PROXY` | 신뢰 프록시의 `X-Real-IP` 사용 여부 |
+| `TELEGRAM_BOT_TOKEN` | 관리자 알림용 Telegram Bot token |
+| `TELEGRAM_CHAT_ID` | 관리자 알림을 받을 Telegram chat ID |
 
 관리자 비밀번호 해시는 다음 순서로 생성합니다. 비밀번호 입력은 화면과 shell history에 표시되지 않으며, 출력된 `$argon2id$...` 전체 값을 `ADMIN_PASSWORD_HASH`로 설정합니다.
 
@@ -169,6 +175,8 @@ docker run --rm --entrypoint sh webagent:local -c \
 
 운영 Compose의 앱 서비스와 내부 DB 연결, healthcheck 구성은 별도 배포 작업에서 추가합니다. Docker 런타임 환경 변수는 Docker 데몬 권한이 있는 사용자에게 조회될 수 있으므로 호스트와 배포 계정 접근도 제한해야 합니다.
 
+`RATE_LIMIT_TRUST_PROXY=true`는 Nginx Proxy Manager가 외부 전달 헤더를 덮어쓰고 앱의 3000 포트 직접 접근이 차단된 운영 환경에서만 사용합니다. 구체적인 계약과 배포 확인 절차는 [`docker/nginx-proxy-manager.md`](docker/nginx-proxy-manager.md)를 따릅니다. 현재 in-memory rate limit은 단일 앱 인스턴스 전용이며 다중 인스턴스 배포 전 Redis 기반 공유 제한으로 교체합니다.
+
 ## 검증
 
 ```bash
@@ -177,7 +185,7 @@ npm run test
 npm run build
 ```
 
-2026-09-07 로컬 검증 기준으로 ESLint, Vitest 12개 파일·49개 테스트, Next.js production build가 모두 통과했습니다. PostgreSQL migration, 독립 상담 저장, n8n 로컬 분석 callback 왕복과 production 컨테이너의 Argon2id 관리자 로그인을 실제 HTTP로 확인했습니다.
+2026-09-09 로컬 검증 기준으로 ESLint, Vitest 18개 파일·112개 테스트, Next.js production build가 모두 통과했습니다. PostgreSQL migration, 독립 상담 저장, 진단·상담 중복 제출 방지, n8n 로컬 분석 callback 왕복과 production 컨테이너의 Argon2id 관리자 로그인을 실제 HTTP로 확인했습니다. 클라이언트 요청 복구, 결과 polling 상한, 관리자 상담 메모·상태 변경과 페이지 계산, AI 결과 검증, rate limit, 구조화 결과 표시, Telegram 알림의 성공·실패·중복 방지도 단위 검증했습니다. 교체한 Bot token의 인증과 429 해제, 진단 완료·상담 신청 알림의 실제 Telegram 채널 수신, 멱등 재전송의 DB 중복 방지를 확인했습니다.
 
 ## 개발 현황
 
@@ -205,9 +213,11 @@ npm run build
 - [x] R3: n8n callback과 제출 API 상태 경합 제거
 - [x] R4: Argon2id 관리자 인증과 로그인 반복 시도 제한
 - [x] R5: 개인정보·SQL 매개변수를 출력하지 않는 서버 오류 로그
-- [ ] R6: 핵심 저장 transaction, 중복 제출 방지와 로그 실패 정책
-- [ ] R7·R8: 네트워크 오류 복구와 관리자 상담 상세·페이지 이동
-- [ ] R9·R10: AI 결과 검증 강화와 운영 프록시·rate limit 보완
+- [x] R6: 핵심 저장 transaction, 중복 제출 방지와 로그 실패 정책
+- [x] R7: 네트워크 오류 복구와 결과 polling 상한
+- [x] R8: 관리자 상담 상세·연락처·메모·페이지 이동
+- [x] R9: AI 결과의 엄격한 숫자 타입과 구현 단계 순서 검증
+- [x] R10: 운영 프록시 계약과 rate limit 만료·저장소 상한 보완
 
 #### 1. n8n 및 AI 분석 연결
 
@@ -223,10 +233,11 @@ AI 결과에는 최소한 `diagnosisPublicId`, `automationScore`, `recommendedTa
 
 #### 2. 관리자 알림 및 실사용 설정
 
-- [ ] Telegram Bot으로 진단 완료 및 상담 신청 알림 연결
-- [ ] 알림에 회사명, 담당자, 이메일, 진단 결과 링크 포함
+- [x] Telegram Bot으로 진단 완료 및 상담 신청 알림 코드 연결
+- [x] 알림에 회사명, 담당자, 이메일, 진단·관리자 링크 포함
+- [x] Telegram Bot API 인증 및 실제 진단·상담 메시지 수신 확인
 - [ ] 운영용 `AUTH_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH` 설정
-- [ ] 관리자 로그인, 조회, 상태 변경의 실제 DB 반영 확인
+- [x] 관리자 로그인, 조회, 상태 변경의 실제 DB 반영 확인
 
 #### 3. 배포 및 운영
 
@@ -241,7 +252,7 @@ AI 결과에는 최소한 `diagnosisPublicId`, `automationScore`, `recommendedTa
 
 - [x] 진단 제출 → PostgreSQL 저장 → n8n 로컬 workflow 호출
 - [ ] AI 결과 저장 → 결과 페이지 표시
-- [ ] 상담 신청 저장 → Telegram 알림
+- [ ] 상담 신청 저장 → Telegram 알림 (실제 수동 왕복 완료, 자동화 미완료)
 - [ ] 관리자 페이지의 진단 및 상담 조회
 
 ## MVP 완료 조건
@@ -256,7 +267,7 @@ AI 결과에는 최소한 `diagnosisPublicId`, `automationScore`, `recommendedTa
 - [x] lint, test, build 통과
 - [x] 실제 n8n Webhook 및 로컬 분석 callback 왕복
 - [x] 로컬 structured output 및 결과 DB 저장 검증
-- [ ] Telegram 관리자 알림
+- [x] Telegram 관리자 알림
 - [ ] 운영 Docker image 실행
 - [ ] 도메인 및 HTTPS 연결
 - [ ] DB 자동 백업 및 복구 검증

@@ -6,6 +6,7 @@ import { diagnoses } from "@/db/schema";
 import { diagnosisStatusValues } from "@/lib/constants/status";
 import { getAdminSession } from "@/lib/auth/admin";
 import { updateDiagnosisStatus } from "../../actions";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
@@ -97,6 +98,27 @@ export default async function AdminDiagnosisDetailPage({
         <pre className="mt-4 overflow-auto rounded-md bg-foreground p-4 text-xs leading-5 text-background">
           {JSON.stringify(diagnosis.rawAnswers, null, 2)}
         </pre>
+      </section>
+
+      <section className="mt-4 rounded-lg border bg-card p-5">
+        <h2 className="text-lg font-bold">연결된 상담</h2>
+        {diagnosis.consultations.length > 0 ? (
+          <div className="mt-4 grid gap-2">
+            {diagnosis.consultations.map((consultation) => (
+              <Link
+                key={consultation.id}
+                href={`/admin/consultations/${consultation.id}`}
+                className="rounded-md border p-3 text-sm font-semibold text-primary"
+              >
+                {consultation.status} · {consultation.createdAt.toLocaleString("ko-KR")}
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-muted-foreground">
+            연결된 상담 신청이 없습니다.
+          </p>
+        )}
       </section>
 
       <section className="mt-4 rounded-lg border bg-card p-5">

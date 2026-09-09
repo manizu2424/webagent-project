@@ -9,12 +9,49 @@ import {
 import { checkRateLimit } from "@/lib/security/rate-limit";
 import { diagnosisSubmissionSchema } from "@/lib/validators/diagnosis";
 import { logServerError, serverErrorResponse } from "@/lib/api/server-error";
+import {
+  createRequestFingerprint,
+  getIdempotencyKey,
+  isUniqueViolation,
+} from "@/lib/api/idempotency";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const WORKFLOW_FAILURE_MESSAGE =
   "n8n webhook delivery failed after 2 attempts.";
+
+type Database = ReturnType<typeof getDb>;
+
+async function findIdempotentDiagnosis(
+  db: Database,
+  idempotencyKey: string,
+  submissionFingerprint: string,
+) {
+  const existing = await db.query.diagnoses.findFirst({
+    columns: {
+      publicId: true,
+      status: true,
+      submissionFingerprint: true,
+    },
+    where: eq(diagnoses.idempotencyKey, idempotencyKey),
+  });
+
+  if (!existing) {
+    return undefined;
+  }
+
+  if (existing.submissionFingerprint !== submissionFingerprint) {
+    return apiError("Idempotency-Key was already used for another request.", 409);
+  }
+
+  return apiOk({
+    publicId: existing.publicId,
+    status: existing.status,
+    n8nStatus: "replayed",
+    replayed: true,
+  });
+}
 
 export async function POST(request: Request) {
   const rateLimit = checkRateLimit(request, "diagnosis", {
@@ -23,10 +60,13 @@ export async function POST(request: Request) {
   });
 
   if (!rateLimit.ok) {
-    return apiError(
+    const response = apiError(
       `Too many requests. Try again in ${rateLimit.retryAfterSeconds} seconds.`,
       429,
     );
+    response.headers.set("retry-after", rateLimit.retryAfterSeconds.toString());
+
+    return response;
   }
 
   const body = await parseJsonBody(request);
@@ -36,35 +76,82 @@ export async function POST(request: Request) {
     return apiError("Invalid diagnosis submission.", 422);
   }
 
+  const idempotencyKey = getIdempotencyKey(request);
+
+  if (!idempotencyKey) {
+    return apiError("Valid Idempotency-Key header is required.", 400);
+  }
+
+  const submissionFingerprint = createRequestFingerprint(parsed.data);
+
   try {
     const db = getDb();
-    const [lead] = await db
-      .insert(leads)
-      .values({
-        companyName: parsed.data.companyName,
-        industry: parsed.data.industry,
-        employeeCount: parsed.data.employeeCount,
-        contactName: parsed.data.contactName,
-        email: parsed.data.email,
-        phone: parsed.data.phone,
-        consultingMethod: parsed.data.consultingMethod,
-      })
-      .returning();
+    const existingResponse = await findIdempotentDiagnosis(
+      db,
+      idempotencyKey,
+      submissionFingerprint,
+    );
 
-    const [diagnosis] = await db
-      .insert(diagnoses)
-      .values({
-        leadId: lead.id,
-        websiteStatus: parsed.data.websiteStatus,
-        currentTools: parsed.data.currentTools,
-        repetitiveTasks: parsed.data.repetitiveTasks,
-        dailyHours: parsed.data.dailyHours?.toString(),
-        monthlyVolume: parsed.data.monthlyVolume,
-        painPoint: parsed.data.painPoint,
-        budgetRange: parsed.data.budgetRange,
-        rawAnswers: parsed.data.rawAnswers ?? parsed.data,
-      })
-      .returning();
+    if (existingResponse) {
+      return existingResponse;
+    }
+
+    let saved!: {
+      lead: typeof leads.$inferSelect;
+      diagnosis: typeof diagnoses.$inferSelect;
+    };
+
+    try {
+      saved = await db.transaction(async (transaction) => {
+        const [lead] = await transaction
+          .insert(leads)
+          .values({
+            companyName: parsed.data.companyName,
+            industry: parsed.data.industry,
+            employeeCount: parsed.data.employeeCount,
+            contactName: parsed.data.contactName,
+            email: parsed.data.email,
+            phone: parsed.data.phone,
+            consultingMethod: parsed.data.consultingMethod,
+          })
+          .returning();
+
+        const [diagnosis] = await transaction
+          .insert(diagnoses)
+          .values({
+            idempotencyKey,
+            submissionFingerprint,
+            leadId: lead.id,
+            websiteStatus: parsed.data.websiteStatus,
+            currentTools: parsed.data.currentTools,
+            repetitiveTasks: parsed.data.repetitiveTasks,
+            dailyHours: parsed.data.dailyHours?.toString(),
+            monthlyVolume: parsed.data.monthlyVolume,
+            painPoint: parsed.data.painPoint,
+            budgetRange: parsed.data.budgetRange,
+            rawAnswers: parsed.data.rawAnswers ?? parsed.data,
+          })
+          .returning();
+
+        return { lead, diagnosis };
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        const concurrentResponse = await findIdempotentDiagnosis(
+          db,
+          idempotencyKey,
+          submissionFingerprint,
+        );
+
+        if (concurrentResponse) {
+          return concurrentResponse;
+        }
+      }
+
+      throw error;
+    }
+
+    const { lead, diagnosis } = saved;
 
     let n8nStatus: "delivered" | "skipped" | "failed" = "skipped";
     let automationErrorMessage: string | undefined;
@@ -109,14 +196,20 @@ export async function POST(request: Request) {
       });
     }
 
-    await db.insert(automationLogs).values({
-      diagnosisId: diagnosis.id,
-      workflowName: "diagnosis-analysis",
-      status: n8nStatus,
-      errorMessage: automationErrorMessage,
-      startedAt: new Date(),
-      finishedAt: new Date(),
-    });
+    try {
+      await db.insert(automationLogs).values({
+        diagnosisId: diagnosis.id,
+        workflowName: "diagnosis-analysis",
+        status: n8nStatus,
+        errorMessage: automationErrorMessage,
+        startedAt: new Date(),
+        finishedAt: new Date(),
+      });
+    } catch (error) {
+      logServerError("diagnosis.automation_log_save_failed", error, {
+        diagnosisId: diagnosis.id,
+      });
+    }
 
     const finalDiagnosis = await db.query.diagnoses.findFirst({
       columns: { status: true },

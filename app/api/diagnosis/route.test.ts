@@ -7,7 +7,9 @@ const mocks = vi.hoisted(() => ({
   isDiagnosisWorkflowConfigured: vi.fn(),
   triggerDiagnosisWorkflow: vi.fn(),
   findDiagnosis: vi.fn(),
+  transaction: vi.fn(),
   insert: vi.fn(),
+  transactionInsert: vi.fn(),
   update: vi.fn(),
   leadValues: vi.fn(),
   diagnosisValues: vi.fn(),
@@ -32,6 +34,7 @@ vi.mock("@/db", () => ({
         findFirst: mocks.findDiagnosis,
       },
     },
+    transaction: mocks.transaction,
     insert: mocks.insert,
     update: mocks.update,
   }),
@@ -48,10 +51,19 @@ const diagnosis = {
   status: "SUBMITTED" as const,
 };
 
-function createRequest() {
+function createRequest(includeIdempotencyKey = true) {
+  const headers = new Headers({ "content-type": "application/json" });
+
+  if (includeIdempotencyKey) {
+    headers.set(
+      "idempotency-key",
+      "123e4567-e89b-42d3-a456-426614174010",
+    );
+  }
+
   return new Request("http://localhost/api/diagnosis", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify({
       companyName: "테스트 회사",
       contactName: "테스트 담당자",
@@ -65,12 +77,14 @@ function createRequest() {
 
 describe("POST /api/diagnosis workflow state", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     mocks.checkRateLimit.mockReturnValue({ ok: true });
     mocks.isDiagnosisWorkflowConfigured.mockReturnValue(false);
-    mocks.findDiagnosis.mockResolvedValue({ status: diagnosis.status });
+    mocks.findDiagnosis
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValue({ status: diagnosis.status });
     mocks.leadValues.mockReturnValue({
       returning: vi.fn().mockResolvedValue([lead]),
     });
@@ -78,10 +92,13 @@ describe("POST /api/diagnosis workflow state", () => {
       returning: vi.fn().mockResolvedValue([diagnosis]),
     });
     mocks.logValues.mockResolvedValue(undefined);
-    mocks.insert
+    mocks.transactionInsert
       .mockReturnValueOnce({ values: mocks.leadValues })
-      .mockReturnValueOnce({ values: mocks.diagnosisValues })
-      .mockReturnValueOnce({ values: mocks.logValues });
+      .mockReturnValueOnce({ values: mocks.diagnosisValues });
+    mocks.transaction.mockImplementation(async (callback) =>
+      callback({ insert: mocks.transactionInsert }),
+    );
+    mocks.insert.mockReturnValue({ values: mocks.logValues });
     mocks.updateWhere.mockResolvedValue(undefined);
     mocks.updateSet.mockReturnValue({ where: mocks.updateWhere });
     mocks.update.mockReturnValue({ set: mocks.updateSet });
@@ -93,7 +110,10 @@ describe("POST /api/diagnosis workflow state", () => {
 
   it("moves the diagnosis to PROCESSING before delivery", async () => {
     mocks.isDiagnosisWorkflowConfigured.mockReturnValue(true);
-    mocks.findDiagnosis.mockResolvedValue({ status: "PROCESSING" });
+    mocks.findDiagnosis
+      .mockReset()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValue({ status: "PROCESSING" });
     mocks.triggerDiagnosisWorkflow.mockResolvedValue({ status: "delivered" });
 
     const response = await POST(createRequest());
@@ -112,6 +132,9 @@ describe("POST /api/diagnosis workflow state", () => {
     expect(mocks.updateSet.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.triggerDiagnosisWorkflow.mock.invocationCallOrder[0],
     );
+    expect(mocks.transaction.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.triggerDiagnosisWorkflow.mock.invocationCallOrder[0],
+    );
     const processingQuery = new PgDialect().sqlToQuery(
       mocks.updateWhere.mock.calls[0][0] as SQL,
     );
@@ -122,6 +145,27 @@ describe("POST /api/diagnosis workflow state", () => {
         errorMessage: undefined,
       }),
     );
+  });
+
+  it("requires a valid idempotency key", async () => {
+    const response = await POST(createRequest(false));
+
+    expect(response.status).toBe(400);
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
+  it("returns 429 with Retry-After when the public bucket is exhausted", async () => {
+    mocks.checkRateLimit.mockReturnValue({
+      ok: false,
+      retryAfterSeconds: 45,
+    });
+
+    const response = await POST(createRequest());
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("45");
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.triggerDiagnosisWorkflow).not.toHaveBeenCalled();
   });
 
   it("keeps the diagnosis SUBMITTED when the webhook is not configured", async () => {
@@ -198,7 +242,10 @@ describe("POST /api/diagnosis workflow state", () => {
 
   it("returns COMPLETED when callback finishes before a successful delivery returns", async () => {
     mocks.isDiagnosisWorkflowConfigured.mockReturnValue(true);
-    mocks.findDiagnosis.mockResolvedValue({ status: "COMPLETED" });
+    mocks.findDiagnosis
+      .mockReset()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValue({ status: "COMPLETED" });
     mocks.triggerDiagnosisWorkflow.mockResolvedValue({ status: "delivered" });
 
     const response = await POST(createRequest());
@@ -218,7 +265,10 @@ describe("POST /api/diagnosis workflow state", () => {
 
   it("preserves COMPLETED when callback finishes before delivery failure", async () => {
     mocks.isDiagnosisWorkflowConfigured.mockReturnValue(true);
-    mocks.findDiagnosis.mockResolvedValue({ status: "COMPLETED" });
+    mocks.findDiagnosis
+      .mockReset()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValue({ status: "COMPLETED" });
     mocks.triggerDiagnosisWorkflow.mockRejectedValue(new Error("timeout"));
 
     const response = await POST(createRequest());
@@ -234,5 +284,80 @@ describe("POST /api/diagnosis workflow state", () => {
       mocks.updateWhere.mock.calls[1][0] as SQL,
     );
     expect(failedQuery.params).toEqual([diagnosis.id, "PROCESSING"]);
+  });
+
+  it("returns the existing diagnosis without triggering the workflow on replay", async () => {
+    const { createRequestFingerprint } = await import("@/lib/api/idempotency");
+    mocks.findDiagnosis.mockReset().mockResolvedValue({
+      publicId: diagnosis.publicId,
+      status: "PROCESSING",
+      submissionFingerprint: createRequestFingerprint({
+        companyName: "테스트 회사",
+        contactName: "테스트 담당자",
+        email: "contact@example.com",
+        privacyConsent: true,
+        currentTools: ["Google Sheets"],
+        repetitiveTasks: ["보고서 정리"],
+      }),
+    });
+
+    const response = await POST(createRequest());
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data).toEqual({
+      publicId: diagnosis.publicId,
+      status: "PROCESSING",
+      n8nStatus: "replayed",
+      replayed: true,
+    });
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.triggerDiagnosisWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("keeps the successful response when automation log storage fails", async () => {
+    mocks.logValues.mockRejectedValue(new Error("log storage unavailable"));
+
+    const response = await POST(createRequest());
+    const body = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(body.data.publicId).toBe(diagnosis.publicId);
+    expect(console.error).toHaveBeenCalledWith(
+      "diagnosis.automation_log_save_failed",
+      expect.objectContaining({ diagnosisId: diagnosis.id }),
+    );
+  });
+
+  it("returns the concurrently-created diagnosis after a unique-key race", async () => {
+    const { createRequestFingerprint } = await import("@/lib/api/idempotency");
+    mocks.findDiagnosis
+      .mockReset()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValue({
+        publicId: diagnosis.publicId,
+        status: "SUBMITTED",
+        submissionFingerprint: createRequestFingerprint({
+          companyName: "테스트 회사",
+          contactName: "테스트 담당자",
+          email: "contact@example.com",
+          privacyConsent: true,
+          currentTools: ["Google Sheets"],
+          repetitiveTasks: ["보고서 정리"],
+        }),
+      });
+    mocks.transaction.mockRejectedValue({
+      cause: { code: "23505" },
+    });
+
+    const response = await POST(createRequest());
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data).toMatchObject({
+      publicId: diagnosis.publicId,
+      replayed: true,
+    });
+    expect(mocks.triggerDiagnosisWorkflow).not.toHaveBeenCalled();
   });
 });

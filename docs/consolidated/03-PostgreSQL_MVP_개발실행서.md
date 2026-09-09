@@ -28,7 +28,7 @@
 ## 3. 시스템 경계
 
 - Next.js는 외부 입력 검증, 원본 저장, n8n 호출, 공개 결과 조회, 상담 저장을 담당한다.
-- n8n은 AI 호출, 결과 검증 전 전달, Telegram과 선택적 이메일을 담당한다.
+- n8n은 AI 호출과 결과 callback을 담당한다. 앱 서버는 결과·상담 transaction 완료 뒤 Telegram 관리자 알림을 보내며 알림 실패가 핵심 저장을 취소하지 않게 격리한다.
 - AI 제공자 키는 브라우저와 Next.js Client Component에 노출하지 않는다.
 - n8n 호출 실패가 이미 저장된 진단 원본을 유실시키면 안 된다.
 - 결과 저장 API는 내부 키를 검증하고 AI 출력을 다시 Zod로 검증한다.
@@ -86,16 +86,16 @@ EMAIL_FROM=
 ### `POST /api/diagnosis`
 
 1. 요청과 개인정보 동의를 Zod로 검증한다.
-2. lead와 diagnosis를 transaction으로 저장한다.
+2. UUID `Idempotency-Key` 요청 헤더와 요청 지문을 확인하고 lead와 diagnosis를 transaction으로 저장한다.
 3. 상태를 `SUBMITTED`에서 `PROCESSING`으로 전환한다.
 4. secret header와 timeout을 사용해 n8n Webhook을 호출한다.
 5. 무작위 `publicId`와 현재 상태를 반환한다.
 
-n8n 호출 실패 시 원본은 보존하고 상태·재시도 가능 이벤트를 남긴다. 같은 제출의 중복 처리를 막기 위한 idempotency 방식을 둔다.
+n8n 호출 실패 시 원본은 보존하고 상태·재시도 가능 이벤트를 남긴다. 같은 키와 같은 내용의 재전송에는 기존 리소스를 반환하고, 같은 키의 다른 내용은 409로 거부한다. 핵심 저장 뒤 실행 로그 저장만 실패한 경우에는 성공 응답을 유지하고 안전한 서버 오류 이벤트로 운영자가 추적한다.
 
 ### `POST /api/internal/diagnosis-result`
 
-`X-Internal-Api-Key`를 상수 시간 방식으로 검증하고, diagnosis 존재 여부와 AI 결과 스키마를 확인한다. 결과 저장과 상태 `COMPLETED` 갱신은 하나의 transaction으로 처리한다. 검증·처리 실패 시 적절한 실패 상태와 오류 코드를 남긴다.
+`x-internal-api-secret`을 검증하고, diagnosis 존재 여부와 AI 결과 스키마를 확인한다. 결과 저장과 상태 `COMPLETED` 갱신은 하나의 transaction으로 처리한다. 검증·처리 실패 시 적절한 실패 상태와 오류 코드를 남긴다.
 
 ### `GET /api/diagnosis/[publicId]`
 
@@ -103,7 +103,7 @@ n8n 호출 실패 시 원본은 보존하고 상태·재시도 가능 이벤트�
 
 ### `POST /api/consultation`
 
-공개 진단 ID, 상담 유형, 메시지를 검증하고 관련 lead와 연결해 저장한 뒤 관리자 알림을 요청한다.
+UUID `Idempotency-Key` 요청 헤더, 공개 진단 ID, 상담 유형, 메시지를 검증한다. 진단 연결 상담은 기존 진단의 lead 연락처를 사용하고, 독립 상담만 lead와 consultation을 하나의 transaction으로 저장한다. 동일 요청 재전송에는 기존 상담과 연락처 출처를 반환한 뒤 관리자 알림을 요청한다.
 
 ### `GET /api/health`
 
@@ -113,8 +113,9 @@ n8n 호출 실패 시 원본은 보존하고 상태·재시도 가능 이벤트�
 
 ```json
 {
+  "diagnosisPublicId": "123e4567-e89b-42d3-a456-426614174000",
   "automationScore": 72,
-  "priorityTasks": [
+  "recommendedTasks": [
     {
       "name": "고객 문의 자동화",
       "reason": "문의량이 많고 수동 확인 시간이 큽니다.",
@@ -122,10 +123,19 @@ n8n 호출 실패 시 원본은 보존하고 상태·재시도 가능 이벤트�
       "estimatedMonthlySavedHours": 12
     }
   ],
-  "totalEstimatedSavedHours": { "min": 35, "max": 50 },
+  "estimatedSavedHoursMin": 35,
+  "estimatedSavedHoursMax": 50,
+  "difficulty": "MEDIUM",
   "recommendedStack": ["Next.js", "n8n", "PostgreSQL", "Telegram"],
-  "implementationSteps": ["데이터 수집", "담당자 알림", "AI 분류"],
-  "summary": "고객 문의와 견적 업무부터 자동화하는 것이 효과적입니다."
+  "implementationSteps": [
+    {
+      "order": 1,
+      "title": "데이터 연결",
+      "description": "기존 문의 데이터를 자동화 흐름에 연결합니다."
+    }
+  ],
+  "aiSummary": "고객 문의와 견적 업무부터 자동화하는 것이 효과적입니다.",
+  "modelName": "production-model"
 }
 ```
 
@@ -134,10 +144,11 @@ n8n 호출 실패 시 원본은 보존하고 상태·재시도 가능 이벤트�
 ## 8. 결과·관리자 화면
 
 - 결과 URL: `/diagnosis/result/[publicId]`
-- `PROCESSING`: 2~3초 간격의 제한된 polling과 진행 안내
+- `PROCESSING`: 5초 간격·최대 2분의 제한된 polling, 장기 대기 시 수동 재확인 안내
 - `COMPLETED`: 점수, 추천, 절감 시간, 난이도, 스택, 단계, 요약, 상담 CTA
 - `FAILED`: 내부 오류를 숨긴 재시도·상담 안내
-- 관리자 경로: `/admin`, `/admin/diagnoses`, `/admin/diagnoses/[id]`, `/admin/consultations`
+- 관리자 경로: `/admin`, `/admin/diagnoses`, `/admin/diagnoses/[publicId]`, `/admin/consultations`, `/admin/consultations/[id]`
+- 진단·상담 목록은 25건 단위로 이동하고 상담 상세에서 연락처, 일정, 요청 내용, 상태와 관리자 메모를 관리한다.
 - 로그인 없는 관리자 경로 접근은 차단하고 `/admin/*`는 `noindex` 처리한다.
 
 ## 9. 보안·개인정보·운영
@@ -150,6 +161,8 @@ n8n 호출 실패 시 원본은 보존하고 상태·재시도 가능 이벤트�
 - 관리자 비밀번호는 Argon2id 해시만 저장하며 salt 없는 SHA-256 값은 허용하지 않는다. 해시는 저장소 밖의 환경 설정에 보관한다.
 - 보안 헤더, 오류 경계, 404, 로딩 상태를 구성한다.
 - 개인정보 수집 목적, 항목, 보관 기간, 파기 방식, 동의를 고지한다. 최종 법률 문구는 사업 환경에 맞게 별도 검토한다.
+- rate limit은 기본적으로 전달 헤더를 신뢰하지 않는다. 운영 프록시가 외부 헤더를 덮어쓰고 앱 직접 접근을 차단한 경우에만 유효한 단일 `X-Real-IP`를 사용한다.
+- in-memory rate limit 저장소는 만료 항목을 정리하고 10,000개로 제한한다. 단일 앱 인스턴스를 넘기기 전 Redis 원자 카운터·TTL 기반 공유 저장소로 교체한다.
 
 ## 10. 백업·배포
 
@@ -183,7 +196,7 @@ Cloudflare → Nginx Proxy Manager → webagent-app:3000
 | 8 | 보안·QA | rate limit, 로그 점검, 오류 UI |
 | 9 | 배포·백업 | SSL, DB 비공개, 백업·복원 검증 |
 
-각 Phase가 끝날 때 `npm run lint`, `npm run test`, `npm run build`를 실행한다. 현재 기준 Vitest 테스트는 12개 파일·49개이며 핵심 API, 인증, 상태 전이와 보안 회귀를 검증한다.
+각 Phase가 끝날 때 `npm run lint`, `npm run test`, `npm run build`를 실행한다. 현재 기준 Vitest 테스트는 18개 파일·112개이며 핵심 API, 인증, 상태 전이, 제출 멱등성, 클라이언트 요청 복구, 관리자 상담 동작, AI 결과 타입·단계 순서·화면 표시, Telegram 알림 격리·중복 방지, rate limit 프록시·저장소와 보안 회귀를 검증한다.
 
 ## 12. 검증 우선순위
 

@@ -1,10 +1,11 @@
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { apiError, apiOk, parseJsonBody } from "@/lib/api/responses";
 import { getDb } from "@/db";
 import { diagnoses, diagnosisResults } from "@/db/schema";
 import { verifyInternalApiSecret } from "@/lib/security/internal-secret";
 import { diagnosisResultSubmissionSchema } from "@/lib/validators/diagnosis-result";
-import { serverErrorResponse } from "@/lib/api/server-error";
+import { logServerError, serverErrorResponse } from "@/lib/api/server-error";
+import { notifyDiagnosisCompleted } from "@/lib/notifications/telegram";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,54 +28,90 @@ export async function POST(request: Request) {
     const db = getDb();
     const diagnosis = await db.query.diagnoses.findFirst({
       where: eq(diagnoses.publicId, parsed.data.diagnosisPublicId),
+      with: {
+        lead: {
+          columns: {
+            companyName: true,
+            contactName: true,
+            email: true,
+          },
+        },
+      },
     });
 
     if (!diagnosis) {
       return apiError("Diagnosis not found.", 404);
     }
 
-    const result = await db.transaction(async (transaction) => {
-      const [savedResult] = await transaction
-        .insert(diagnosisResults)
-        .values({
-          diagnosisId: diagnosis.id,
-          automationScore: parsed.data.automationScore,
-          recommendedTasks: parsed.data.recommendedTasks,
-          estimatedSavedHoursMin: parsed.data.estimatedSavedHoursMin.toString(),
-          estimatedSavedHoursMax: parsed.data.estimatedSavedHoursMax.toString(),
-          difficulty: parsed.data.difficulty,
-          recommendedStack: parsed.data.recommendedStack,
-          implementationSteps: parsed.data.implementationSteps,
-          aiSummary: parsed.data.aiSummary,
-          rawAiResult: parsed.data,
-          modelName: parsed.data.modelName,
-        })
-        .onConflictDoUpdate({
-          target: diagnosisResults.diagnosisId,
-          set: {
+    const { result, shouldNotify } = await db.transaction(
+      async (transaction) => {
+        const [savedResult] = await transaction
+          .insert(diagnosisResults)
+          .values({
+            diagnosisId: diagnosis.id,
             automationScore: parsed.data.automationScore,
             recommendedTasks: parsed.data.recommendedTasks,
-            estimatedSavedHoursMin:
-              parsed.data.estimatedSavedHoursMin.toString(),
-            estimatedSavedHoursMax:
-              parsed.data.estimatedSavedHoursMax.toString(),
+            estimatedSavedHoursMin: parsed.data.estimatedSavedHoursMin.toString(),
+            estimatedSavedHoursMax: parsed.data.estimatedSavedHoursMax.toString(),
             difficulty: parsed.data.difficulty,
             recommendedStack: parsed.data.recommendedStack,
             implementationSteps: parsed.data.implementationSteps,
             aiSummary: parsed.data.aiSummary,
             rawAiResult: parsed.data,
             modelName: parsed.data.modelName,
-          },
-        })
-        .returning();
+          })
+          .onConflictDoUpdate({
+            target: diagnosisResults.diagnosisId,
+            set: {
+              automationScore: parsed.data.automationScore,
+              recommendedTasks: parsed.data.recommendedTasks,
+              estimatedSavedHoursMin:
+                parsed.data.estimatedSavedHoursMin.toString(),
+              estimatedSavedHoursMax:
+                parsed.data.estimatedSavedHoursMax.toString(),
+              difficulty: parsed.data.difficulty,
+              recommendedStack: parsed.data.recommendedStack,
+              implementationSteps: parsed.data.implementationSteps,
+              aiSummary: parsed.data.aiSummary,
+              rawAiResult: parsed.data,
+              modelName: parsed.data.modelName,
+            },
+          })
+          .returning();
 
-      await transaction
-        .update(diagnoses)
-        .set({ status: "COMPLETED", updatedAt: new Date() })
-        .where(eq(diagnoses.id, diagnosis.id));
+        const [completedDiagnosis] = await transaction
+          .update(diagnoses)
+          .set({ status: "COMPLETED", updatedAt: new Date() })
+          .where(
+            and(
+              eq(diagnoses.id, diagnosis.id),
+              ne(diagnoses.status, "COMPLETED"),
+            ),
+          )
+          .returning({ id: diagnoses.id });
 
-      return savedResult;
-    });
+        return {
+          result: savedResult,
+          shouldNotify: Boolean(completedDiagnosis),
+        };
+      },
+    );
+
+    if (shouldNotify) {
+      try {
+        await notifyDiagnosisCompleted({
+          publicId: diagnosis.publicId,
+          companyName: diagnosis.lead.companyName,
+          contactName: diagnosis.lead.contactName,
+          email: diagnosis.lead.email,
+          automationScore: parsed.data.automationScore,
+        });
+      } catch (error) {
+        logServerError("telegram.diagnosis_notification_failed", error, {
+          diagnosisId: diagnosis.id,
+        });
+      }
+    }
 
     return apiOk({
       resultId: result.id,

@@ -4,6 +4,12 @@ import { getDb } from "@/db";
 import { diagnosisPublicIdSchema } from "@/lib/validators/diagnosis";
 import { diagnoses } from "@/db/schema";
 import { serverErrorResponse } from "@/lib/api/server-error";
+import {
+  diagnosisDifficultySchema,
+  implementationStepsSchema,
+  recommendedStackSchema,
+  recommendedTasksSchema,
+} from "@/lib/validators/diagnosis-result";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +19,13 @@ type RouteContext = {
     publicId: string;
   }>;
 };
+
+function getValidatedData<T>(
+  result: { success: true; data: T } | { success: false },
+  fallback: T,
+) {
+  return result.success ? result.data : fallback;
+}
 
 export async function GET(_request: Request, context: RouteContext) {
   const { publicId } = await context.params;
@@ -69,14 +82,34 @@ export async function GET(_request: Request, context: RouteContext) {
         result: diagnosis.result
           ? {
               automationScore: diagnosis.result.automationScore,
-              recommendedTasks: diagnosis.result.recommendedTasks,
+              recommendedTasks: getValidatedData(
+                recommendedTasksSchema.safeParse(
+                  diagnosis.result.recommendedTasks,
+                ),
+                [],
+              ),
               estimatedSavedHoursMin:
                 diagnosis.result.estimatedSavedHoursMin,
               estimatedSavedHoursMax:
                 diagnosis.result.estimatedSavedHoursMax,
-              difficulty: diagnosis.result.difficulty,
-              recommendedStack: diagnosis.result.recommendedStack,
-              implementationSteps: diagnosis.result.implementationSteps,
+              difficulty: getValidatedData(
+                diagnosisDifficultySchema.safeParse(
+                  diagnosis.result.difficulty,
+                ),
+                null,
+              ),
+              recommendedStack: getValidatedData(
+                recommendedStackSchema.safeParse(
+                  diagnosis.result.recommendedStack,
+                ),
+                [],
+              ),
+              implementationSteps: getValidatedData(
+                implementationStepsSchema.safeParse(
+                  diagnosis.result.implementationSteps,
+                ),
+                [],
+              ),
               aiSummary: diagnosis.result.aiSummary,
             }
           : null,

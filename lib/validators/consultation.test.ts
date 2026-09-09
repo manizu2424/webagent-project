@@ -13,6 +13,27 @@ describe("consultationSubmissionSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("normalizes contact overrides when a diagnosis is linked", () => {
+    const result = consultationSubmissionSchema.safeParse({
+      diagnosisPublicId: "306ad6d3-bfbc-4ad5-b934-455c7cffb1f5",
+      companyName: "새 회사명",
+      contactName: "새 담당자",
+      email: "new@example.com",
+      phone: "010-0000-0000",
+      privacyConsent: true,
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toMatchObject({
+        companyName: undefined,
+        contactName: undefined,
+        email: undefined,
+        phone: undefined,
+      });
+    }
+  });
+
   it("accepts a standalone consultation with contact fields", () => {
     const result = consultationSubmissionSchema.safeParse({
       diagnosisPublicId: "",

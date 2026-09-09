@@ -48,12 +48,25 @@ describe("GET /api/diagnosis/[publicId]", () => {
       result: {
         id: "private-result-id",
         automationScore: 85,
-        recommendedTasks: [{ title: "보고서 자동화" }],
+        recommendedTasks: [
+          {
+            name: "보고서 자동화",
+            reason: "반복 작성 시간이 큽니다.",
+            difficulty: "MEDIUM",
+            estimatedMonthlySavedHours: 12,
+          },
+        ],
         estimatedSavedHoursMin: "10.00",
         estimatedSavedHoursMax: "20.00",
         difficulty: "MEDIUM",
         recommendedStack: ["n8n"],
-        implementationSteps: [{ order: 1, title: "연결" }],
+        implementationSteps: [
+          {
+            order: 1,
+            title: "연결",
+            description: "업무 데이터를 연결합니다.",
+          },
+        ],
         aiSummary: "자동화 가능성이 높습니다.",
         rawAiResult: { privatePrompt: true },
         modelName: "private-model",
@@ -77,12 +90,25 @@ describe("GET /api/diagnosis/[publicId]", () => {
           },
           result: {
             automationScore: 85,
-            recommendedTasks: [{ title: "보고서 자동화" }],
+            recommendedTasks: [
+              {
+                name: "보고서 자동화",
+                reason: "반복 작성 시간이 큽니다.",
+                difficulty: "MEDIUM",
+                estimatedMonthlySavedHours: 12,
+              },
+            ],
             estimatedSavedHoursMin: "10.00",
             estimatedSavedHoursMax: "20.00",
             difficulty: "MEDIUM",
             recommendedStack: ["n8n"],
-            implementationSteps: [{ order: 1, title: "연결" }],
+            implementationSteps: [
+              {
+                order: 1,
+                title: "연결",
+                description: "업무 데이터를 연결합니다.",
+              },
+            ],
             aiSummary: "자동화 가능성이 높습니다.",
           },
         },
@@ -98,6 +124,41 @@ describe("GET /api/diagnosis/[publicId]", () => {
     expect(serializedBody).not.toContain("private-result-id");
     expect(serializedBody).not.toContain("privatePrompt");
     expect(serializedBody).not.toContain("private-model");
+  });
+
+  it("falls back safely when optional structured collections are invalid", async () => {
+    findFirstMock.mockResolvedValue({
+      publicId,
+      status: "COMPLETED",
+      painPoint: null,
+      repetitiveTasks: [],
+      lead: { companyName: "테스트 회사" },
+      result: {
+        automationScore: 70,
+        recommendedTasks: [{ unexpected: true }],
+        estimatedSavedHoursMin: null,
+        estimatedSavedHoursMax: null,
+        difficulty: "UNKNOWN",
+        recommendedStack: [""],
+        implementationSteps: [{ order: 2 }],
+        aiSummary: null,
+      },
+    });
+
+    const response = await callRoute();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.diagnosis.result).toEqual({
+      automationScore: 70,
+      recommendedTasks: [],
+      estimatedSavedHoursMin: null,
+      estimatedSavedHoursMax: null,
+      difficulty: null,
+      recommendedStack: [],
+      implementationSteps: [],
+      aiSummary: null,
+    });
   });
 
   it("rejects an invalid public id before querying the database", async () => {

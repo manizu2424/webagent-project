@@ -4,9 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   checkRateLimit: vi.fn(),
   findDiagnosis: vi.fn(),
-  insert: vi.fn(),
+  findConsultation: vi.fn(),
+  transaction: vi.fn(),
+  transactionInsert: vi.fn(),
   leadValues: vi.fn(),
   consultationValues: vi.fn(),
+  notifyConsultationRequested: vi.fn(),
 }));
 
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -19,15 +22,25 @@ vi.mock("@/db", () => ({
       diagnoses: {
         findFirst: mocks.findDiagnosis,
       },
+      consultations: {
+        findFirst: mocks.findConsultation,
+      },
     },
-    insert: mocks.insert,
+    transaction: mocks.transaction,
   }),
+}));
+
+vi.mock("@/lib/notifications/telegram", () => ({
+  notifyConsultationRequested: mocks.notifyConsultationRequested,
 }));
 
 import { POST } from "./route";
 
 const lead = {
   id: "123e4567-e89b-42d3-a456-426614174001",
+  companyName: "테스트 회사",
+  contactName: "테스트 담당자",
+  email: "contact@example.com",
 };
 const consultation = {
   id: "123e4567-e89b-42d3-a456-426614174002",
@@ -37,15 +50,26 @@ const consultation = {
 function createRequest(body: Record<string, unknown>) {
   return new Request("http://localhost/api/consultation", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": "123e4567-e89b-42d3-a456-426614174020",
+    },
     body: JSON.stringify(body),
   });
 }
 
 describe("POST /api/consultation", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mocks.checkRateLimit.mockReturnValue({ ok: true });
+    mocks.findConsultation.mockResolvedValue(undefined);
+    mocks.notifyConsultationRequested.mockResolvedValue({ status: "sent" });
+    mocks.transaction.mockImplementation(async (callback) =>
+      callback({
+        query: { diagnoses: { findFirst: mocks.findDiagnosis } },
+        insert: mocks.transactionInsert,
+      }),
+    );
   });
 
   afterEach(() => {
@@ -59,7 +83,7 @@ describe("POST /api/consultation", () => {
     mocks.consultationValues.mockReturnValue({
       returning: vi.fn().mockResolvedValue([consultation]),
     });
-    mocks.insert
+    mocks.transactionInsert
       .mockReturnValueOnce({ values: mocks.leadValues })
       .mockReturnValueOnce({ values: mocks.consultationValues });
 
@@ -82,8 +106,10 @@ describe("POST /api/consultation", () => {
     expect(body.data).toEqual({
       consultationId: consultation.id,
       status: consultation.status,
+      contactSource: "submission",
     });
     expect(mocks.findDiagnosis).not.toHaveBeenCalled();
+    expect(mocks.transaction).toHaveBeenCalledTimes(1);
     expect(mocks.leadValues).toHaveBeenCalledWith(
       expect.objectContaining({
         companyName: "테스트 회사",
@@ -95,6 +121,64 @@ describe("POST /api/consultation", () => {
       expect.objectContaining({
         leadId: lead.id,
         diagnosisId: undefined,
+      }),
+    );
+    expect(mocks.notifyConsultationRequested).toHaveBeenCalledWith({
+      consultationId: consultation.id,
+      diagnosisPublicId: undefined,
+      companyName: "테스트 회사",
+      contactName: "테스트 담당자",
+      email: "contact@example.com",
+      consultationType: "online",
+    });
+    expect(mocks.transaction.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.notifyConsultationRequested.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("uses the existing lead when a diagnosis is linked", async () => {
+    const diagnosis = {
+      id: "123e4567-e89b-42d3-a456-426614174003",
+      leadId: lead.id,
+      lead,
+    };
+    mocks.findDiagnosis.mockResolvedValue(diagnosis);
+    mocks.consultationValues.mockReturnValue({
+      returning: vi.fn().mockResolvedValue([consultation]),
+    });
+    mocks.transactionInsert.mockReturnValue({
+      values: mocks.consultationValues,
+    });
+
+    const response = await POST(
+      createRequest({
+        diagnosisPublicId: "123e4567-e89b-42d3-a456-426614174099",
+        companyName: "무시하지 않고 기존 리드를 사용하는 정책",
+        email: "new@example.com",
+        privacyConsent: true,
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(body.data).toEqual({
+      consultationId: consultation.id,
+      status: consultation.status,
+      contactSource: "diagnosis",
+    });
+    expect(mocks.transactionInsert).toHaveBeenCalledTimes(1);
+    expect(mocks.consultationValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        leadId: lead.id,
+        diagnosisId: diagnosis.id,
+      }),
+    );
+    expect(mocks.notifyConsultationRequested).toHaveBeenCalledWith(
+      expect.objectContaining({
+        diagnosisPublicId: "123e4567-e89b-42d3-a456-426614174099",
+        companyName: lead.companyName,
+        contactName: lead.contactName,
+        email: lead.email,
       }),
     );
   });
@@ -112,12 +196,32 @@ describe("POST /api/consultation", () => {
 
     expect(response.status).toBe(404);
     expect(body).toMatchObject({ ok: false, error: "Diagnosis not found." });
-    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.transactionInsert).not.toHaveBeenCalled();
+  });
+
+  it("returns 429 with Retry-After when the public bucket is exhausted", async () => {
+    mocks.checkRateLimit.mockReturnValue({
+      ok: false,
+      retryAfterSeconds: 45,
+    });
+
+    const response = await POST(
+      createRequest({
+        companyName: "테스트 회사",
+        contactName: "테스트 담당자",
+        email: "contact@example.com",
+        privacyConsent: true,
+      }),
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("45");
+    expect(mocks.transaction).not.toHaveBeenCalled();
   });
 
   it("does not expose query parameters when storage fails", async () => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    mocks.insert.mockImplementationOnce(() => {
+    mocks.transactionInsert.mockImplementationOnce(() => {
       throw new DrizzleQueryError(
         "insert into leads (email, phone) values ($1, $2)",
         ["private@example.invalid", "010-secret-number"],
@@ -146,5 +250,92 @@ describe("POST /api/consultation", () => {
     expect(serializedLogs).not.toContain("010-secret-number");
     expect(serializedLogs).not.toContain("insert into leads");
     expect(serializedLogs).not.toContain("database failure");
+  });
+
+  it("returns an existing consultation for the same request key", async () => {
+    const { createRequestFingerprint } = await import("@/lib/api/idempotency");
+    const requestBody = {
+      diagnosisPublicId: "",
+      companyName: "테스트 회사",
+      contactName: "테스트 담당자",
+      email: "contact@example.com",
+      privacyConsent: true,
+    };
+    mocks.findConsultation.mockResolvedValue({
+      ...consultation,
+      diagnosisId: null,
+      submissionFingerprint: createRequestFingerprint({
+        companyName: requestBody.companyName,
+        contactName: requestBody.contactName,
+        email: requestBody.email,
+        privacyConsent: true,
+      }),
+    });
+
+    const response = await POST(createRequest(requestBody));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data).toEqual({
+      consultationId: consultation.id,
+      status: consultation.status,
+      contactSource: "submission",
+      replayed: true,
+    });
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.notifyConsultationRequested).not.toHaveBeenCalled();
+  });
+
+  it("rejects reuse of a request key with different content", async () => {
+    mocks.findConsultation.mockResolvedValue({
+      ...consultation,
+      submissionFingerprint: "different-fingerprint",
+    });
+
+    const response = await POST(
+      createRequest({
+        companyName: "테스트 회사",
+        contactName: "테스트 담당자",
+        email: "contact@example.com",
+        privacyConsent: true,
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
+  it("keeps a successful response when Telegram delivery fails", async () => {
+    const errorLog = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    mocks.leadValues.mockReturnValue({
+      returning: vi.fn().mockResolvedValue([lead]),
+    });
+    mocks.consultationValues.mockReturnValue({
+      returning: vi.fn().mockResolvedValue([consultation]),
+    });
+    mocks.transactionInsert
+      .mockReturnValueOnce({ values: mocks.leadValues })
+      .mockReturnValueOnce({ values: mocks.consultationValues });
+    mocks.notifyConsultationRequested.mockRejectedValue(
+      new Error("https://api.telegram.org/botprivate-token/sendMessage"),
+    );
+
+    const response = await POST(
+      createRequest({
+        companyName: "테스트 회사",
+        contactName: "테스트 담당자",
+        email: "contact@example.com",
+        privacyConsent: true,
+      }),
+    );
+    const serializedLogs = JSON.stringify(errorLog.mock.calls);
+
+    expect(response.status).toBe(201);
+    expect(serializedLogs).toContain(
+      "telegram.consultation_notification_failed",
+    );
+    expect(serializedLogs).not.toContain("private-token");
   });
 });

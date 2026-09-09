@@ -75,4 +75,67 @@ describe("diagnosisResultSubmissionSchema", () => {
 
     expect(result.success).toBe(false);
   });
+
+  it.each([null, "", true, false])(
+    "rejects non-number AI values instead of coercing %j",
+    (invalidNumber) => {
+      const payloads = [
+        { ...validResult, automationScore: invalidNumber },
+        {
+          ...validResult,
+          recommendedTasks: [
+            {
+              ...validResult.recommendedTasks[0],
+              estimatedMonthlySavedHours: invalidNumber,
+            },
+          ],
+        },
+        { ...validResult, estimatedSavedHoursMin: invalidNumber },
+        { ...validResult, estimatedSavedHoursMax: invalidNumber },
+        {
+          ...validResult,
+          implementationSteps: [
+            { ...validResult.implementationSteps[0], order: invalidNumber },
+          ],
+        },
+      ];
+
+      for (const payload of payloads) {
+        expect(diagnosisResultSubmissionSchema.safeParse(payload).success).toBe(
+          false,
+        );
+      }
+    },
+  );
+
+  it.each([
+    ["does not start at 1", [2, 3]],
+    ["contains duplicate orders", [1, 2, 2]],
+    ["contains a gap", [1, 3]],
+    ["is out of array order", [2, 1]],
+  ])("rejects implementation steps when the order %s", (_, orders) => {
+    const result = diagnosisResultSubmissionSchema.safeParse({
+      ...validResult,
+      implementationSteps: orders.map((order) => ({
+        order,
+        title: `구현 단계 ${order}`,
+        description: "순서 검증 대상입니다.",
+      })),
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts implementation steps ordered consecutively from 1", () => {
+    const result = diagnosisResultSubmissionSchema.safeParse({
+      ...validResult,
+      implementationSteps: [1, 2, 3].map((order) => ({
+        order,
+        title: `구현 단계 ${order}`,
+        description: "순서대로 실행합니다.",
+      })),
+    });
+
+    expect(result.success).toBe(true);
+  });
 });

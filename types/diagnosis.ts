@@ -1,4 +1,20 @@
 import type { DiagnosisStatus } from "@/lib/constants/status";
+import type {
+  DiagnosisDifficulty,
+  DiagnosisImplementationStep,
+  DiagnosisRecommendedTask,
+} from "@/lib/validators/diagnosis-result";
+
+export type PublicDiagnosisResult = {
+  automationScore: number;
+  recommendedTasks: DiagnosisRecommendedTask[];
+  estimatedSavedHoursMin: string | null;
+  estimatedSavedHoursMax: string | null;
+  difficulty: DiagnosisDifficulty | null;
+  recommendedStack: string[];
+  implementationSteps: DiagnosisImplementationStep[];
+  aiSummary: string | null;
+};
 
 export type PublicDiagnosisData = {
   diagnosis: {
@@ -9,15 +25,6 @@ export type PublicDiagnosisData = {
     lead: {
       companyName: string;
     };
-    result: null | {
-      automationScore: number;
-      recommendedTasks: Record<string, unknown>[];
-      estimatedSavedHoursMin: string | null;
-      estimatedSavedHoursMax: string | null;
-      difficulty: string | null;
-      recommendedStack: string[] | null;
-      implementationSteps: Record<string, unknown>[] | null;
-      aiSummary: string | null;
-    };
+    result: PublicDiagnosisResult | null;
   };
 };

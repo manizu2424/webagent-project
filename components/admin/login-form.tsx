@@ -3,6 +3,8 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
+import type { ApiResponse } from "@/lib/api/responses";
+import { getClientErrorMessage, requestJson } from "@/lib/api/client";
 
 export function AdminLoginForm() {
   const router = useRouter();
@@ -16,21 +18,31 @@ export function AdminLoginForm() {
     setIsSubmitting(true);
     setError("");
 
-    const response = await fetch("/api/admin/login", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    const result = await response.json();
+    try {
+      const { response, data: result } = await requestJson<
+        ApiResponse<{ authenticated: true }>
+      >(
+        "/api/admin/login",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        },
+        { timeoutMs: 10_000 },
+      );
 
-    if (!response.ok || !result.ok) {
+      if (!response.ok || !result.ok) {
+        setError(result.ok ? "로그인에 실패했습니다." : result.error);
+        return;
+      }
+
+      router.push("/admin/diagnoses");
+      router.refresh();
+    } catch (error) {
+      setError(getClientErrorMessage(error, "로그인에 실패했습니다."));
+    } finally {
       setIsSubmitting(false);
-      setError(result.error ?? "로그인에 실패했습니다.");
-      return;
     }
-
-    router.push("/admin/diagnoses");
-    router.refresh();
   }
 
   return (

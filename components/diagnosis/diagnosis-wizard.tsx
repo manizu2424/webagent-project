@@ -1,8 +1,10 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Check, Loader2 } from "lucide-react";
+import type { ApiResponse } from "@/lib/api/responses";
+import { getClientErrorMessage, requestJson } from "@/lib/api/client";
 
 const steps = [
   "회사 정보",
@@ -57,10 +59,12 @@ export function DiagnosisWizard() {
   const [form, setForm] = useState<FormState>(initialForm);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const idempotencyKey = useRef<string | null>(null);
 
   const progress = useMemo(() => ((step + 1) / steps.length) * 100, [step]);
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
+    idempotencyKey.current = null;
     setForm((current) => ({ ...current, [key]: value }));
     setError("");
   }
@@ -132,20 +136,35 @@ export function DiagnosisWizard() {
       monthlyVolume: form.monthlyVolume ? Number(form.monthlyVolume) : undefined,
     };
 
-    const response = await fetch("/api/diagnosis", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const result = await response.json();
+    idempotencyKey.current ??= crypto.randomUUID();
 
-    if (!response.ok || !result.ok) {
+    try {
+      const { response, data: result } = await requestJson<
+        ApiResponse<{ publicId: string }>
+      >(
+        "/api/diagnosis",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "idempotency-key": idempotencyKey.current,
+          },
+          body: JSON.stringify(payload),
+        },
+        { timeoutMs: 12_000, retries: 1 },
+      );
+
+      if (!response.ok || !result.ok) {
+        setError(result.ok ? "진단 제출에 실패했습니다." : result.error);
+        return;
+      }
+
+      router.push(`/diagnosis/result/${result.data.publicId}`);
+    } catch (error) {
+      setError(getClientErrorMessage(error, "진단 제출에 실패했습니다."));
+    } finally {
       setIsSubmitting(false);
-      setError(result.error ?? "진단 제출에 실패했습니다.");
-      return;
     }
-
-    router.push(`/diagnosis/result/${result.data.publicId}`);
   }
 
   return (

@@ -3,6 +3,7 @@
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { consultations, diagnoses } from "@/db/schema";
 import { getAdminSession } from "@/lib/auth/admin";
@@ -20,6 +21,8 @@ async function requireAdmin() {
     redirect("/admin/login");
   }
 }
+
+const consultationIdSchema = z.string().uuid();
 
 export async function updateDiagnosisStatus(formData: FormData) {
   await requireAdmin();
@@ -46,7 +49,10 @@ export async function updateConsultationStatus(formData: FormData) {
   const consultationId = String(formData.get("consultationId") ?? "");
   const status = String(formData.get("status") ?? "");
 
-  if (!consultationStatusValues.includes(status as ConsultationStatus)) {
+  if (
+    !consultationIdSchema.safeParse(consultationId).success ||
+    !consultationStatusValues.includes(status as ConsultationStatus)
+  ) {
     return;
   }
 
@@ -56,4 +62,28 @@ export async function updateConsultationStatus(formData: FormData) {
     .where(eq(consultations.id, consultationId));
 
   revalidatePath("/admin/consultations");
+  revalidatePath(`/admin/consultations/${consultationId}`);
+}
+
+export async function updateConsultationMemo(formData: FormData) {
+  await requireAdmin();
+
+  const consultationId = String(formData.get("consultationId") ?? "");
+  const memoResult = z
+    .string()
+    .trim()
+    .max(5_000)
+    .safeParse(String(formData.get("memo") ?? ""));
+
+  if (!consultationIdSchema.safeParse(consultationId).success || !memoResult.success) {
+    return;
+  }
+
+  await getDb()
+    .update(consultations)
+    .set({ memo: memoResult.data || null, updatedAt: new Date() })
+    .where(eq(consultations.id, consultationId));
+
+  revalidatePath("/admin/consultations");
+  revalidatePath(`/admin/consultations/${consultationId}`);
 }
