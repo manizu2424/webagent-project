@@ -25,6 +25,30 @@
 - [ ] 운영 배포, 백업 및 복원 검증
 - [ ] 핵심 E2E 테스트
 
+## 전체 프로젝트 완성 현황 요약
+
+현재 WEBAGENT.KR은 **기능형 MVP는 완성됐고, 공개 운영 준비와 자동화된 E2E 검증이 남은 단계**입니다.
+
+완성된 범위:
+
+- 랜딩 페이지, 5단계 진단 폼, 구조화된 결과 화면과 상담 신청
+- PostgreSQL·Drizzle schema/migration과 transaction·멱등 키 기반 중복 방지
+- n8n 로컬 분석 전체 왕복, callback upsert, 상태 경합 방지
+- Argon2id 관리자 인증, 진단·상담 조회, 상태·메모·페이지 관리
+- 공개 API 개인정보 차단, 안전한 오류 로그, rate limit, 보안 헤더와 프록시 IP 계약
+- 진단 완료·상담 신청 Telegram 알림과 실제 채널 수신 검증
+- ESLint, Vitest 18개 파일·112개 테스트, Next.js production build 통과
+
+남은 범위와 권장 순서:
+
+1. 진단·callback·결과·상담·관리자 핵심 흐름의 통합/E2E 테스트 자동화
+2. 동의 시각·정책 버전 저장, 실제 문의 주소, 입력·요청 크기 상한 보완
+3. 로컬 결정론적 분석 노드를 운영용 OpenAI 또는 Gemini 모델로 교체하고 structured output 검증
+4. 운영 Compose, runtime 환경 변수, 앱·DB healthcheck, 재시작과 PostgreSQL 외부 비공개 검증
+5. `pg_dump` 자동 백업, VPS 외부 저장, 보관 정책, 실제 복원 테스트
+6. 운영 secret, Nginx Proxy Manager, Cloudflare DNS, HTTPS와 `webagent.kr` 공개 배포
+7. 배포 후 보안·백업·핵심 E2E 최종 재검증
+
 ## 다음 재개 지점 (인수인계)
 
 > **현재 위치: R1~R10, 4A, 결과 화면과 Telegram 알림의 실제 수신 검증까지 완료했습니다. 다음 작업은 7번 핵심 통합 및 E2E 테스트입니다.**
@@ -33,7 +57,7 @@
 
 ### 2026-09-09 세션 종료 인수인계
 
-- R6~R10, 결과 화면과 Telegram 알림 구현·문서 변경은 작업 트리에 **의도적으로 미커밋 상태**로 남아 있습니다. 다음 세션에서 `git status --short`와 `git diff --check`를 먼저 확인하고 기존 변경을 되돌리지 않습니다.
+- R6~R10, 결과 화면, Telegram 알림 구현·검증과 관련 문서는 `6b7042b` 커밋으로 `origin/main`에 push했습니다.
 - R6 migration `db/migrations/0001_swift_deathstrike.sql`은 기존 행 백필을 포함하며 로컬 PostgreSQL 영속 볼륨에 실제 적용했습니다.
 - R6 실제 HTTP 중복 제출 검증용 합성 데이터는 삭제했습니다. 개발 서버, PostgreSQL과 n8n 컨테이너는 모두 종료 상태입니다.
 - 교체한 Telegram Bot token의 `getMe` 인증과 429 해제를 확인했습니다. token과 Telegram 응답 원문은 출력하거나 문서에 저장하지 않았습니다.
