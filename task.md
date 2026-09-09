@@ -22,6 +22,8 @@
 - [x] 실제 PostgreSQL 로컬 저장 및 관리자 흐름 검증
 - [x] 실제 n8n 로컬 전체 흐름 검증
 - [x] Telegram 관리자 알림 구현, mock 및 실제 수신 검증
+- [x] 현재 PC의 `n8n-v2` 구성 조사와 WEBAGENT 연결 가이드 문서화
+- [ ] 기존 `n8n-v2:8678` 재사용 설정·workflow import·전체 왕복 검증
 - [ ] 운영 배포, 백업 및 복원 검증
 - [ ] 핵심 E2E 테스트
 
@@ -41,17 +43,18 @@
 
 남은 범위와 권장 순서:
 
-1. 진단·callback·결과·상담·관리자 핵심 흐름의 통합/E2E 테스트 자동화
-2. 동의 시각·정책 버전 저장, 실제 문의 주소, 입력·요청 크기 상한 보완
-3. 로컬 결정론적 분석 노드를 운영용 OpenAI 또는 Gemini 모델로 교체하고 structured output 검증
-4. 운영 Compose, runtime 환경 변수, 앱·DB healthcheck, 재시작과 PostgreSQL 외부 비공개 검증
-5. `pg_dump` 자동 백업, VPS 외부 저장, 보관 정책, 실제 복원 테스트
-6. 운영 secret, Nginx Proxy Manager, Cloudflare DNS, HTTPS와 `webagent.kr` 공개 배포
-7. 배포 후 보안·백업·핵심 E2E 최종 재검증
+1. 기존 `n8n-v2:8678` 재사용 여부를 확정하고, 재사용 시 백업·환경 변수·workflow import·publish·전체 왕복 검증
+2. 진단·callback·결과·상담·관리자 핵심 흐름의 통합/E2E 테스트 자동화
+3. 동의 시각·정책 버전 저장, 실제 문의 주소, 입력·요청 크기 상한 보완
+4. 로컬 결정론적 분석 노드를 운영용 OpenAI 또는 Gemini 모델로 교체하고 structured output 검증
+5. 운영 Compose, runtime 환경 변수, 앱·DB healthcheck, 재시작과 PostgreSQL 외부 비공개 검증
+6. `pg_dump` 자동 백업, VPS 외부 저장, 보관 정책, 실제 복원 테스트
+7. 운영 secret, Nginx Proxy Manager, Cloudflare DNS, HTTPS와 `webagent.kr` 공개 배포
+8. 배포 후 보안·백업·핵심 E2E 최종 재검증
 
 ## 다음 재개 지점 (인수인계)
 
-> **현재 위치: R1~R10, 4A, 결과 화면과 Telegram 알림의 실제 수신 검증까지 완료했습니다. 다음 작업은 7번 핵심 통합 및 E2E 테스트입니다.**
+> **현재 위치: R1~R10, 4A, 결과 화면과 Telegram 알림의 실제 수신 검증까지 완료했습니다. 현재 PC의 `n8n-v2:8678` 구성은 조사·문서화했으며, 다음 작업은 기존 n8n-v2의 안전한 재사용 설정과 전체 왕복 검증입니다.**
 >
 > 2026-09-09에 교체한 Bot token으로 `getMe`가 성공했고, 진단 완료와 상담 신청 메시지가 실제 Telegram 채널에 도착한 것을 확인했습니다. 같은 멱등 키 재전송은 기존 ID와 `replayed: true`를 반환했고 추가 DB 행을 만들지 않았습니다.
 
@@ -59,22 +62,25 @@
 
 - R6~R10, 결과 화면, Telegram 알림 구현·검증과 관련 문서는 `6b7042b` 커밋으로 `origin/main`에 push했습니다.
 - R6 migration `db/migrations/0001_swift_deathstrike.sql`은 기존 행 백필을 포함하며 로컬 PostgreSQL 영속 볼륨에 실제 적용했습니다.
-- R6 실제 HTTP 중복 제출 검증용 합성 데이터는 삭제했습니다. 개발 서버, PostgreSQL과 n8n 컨테이너는 모두 종료 상태입니다.
+- R6 실제 HTTP 중복 제출 검증용 합성 데이터는 삭제했습니다. WEBAGENT 개발 서버와 프로젝트 전용 `webagent-db`·`webagent-n8n` 컨테이너는 종료 상태입니다.
 - 교체한 Telegram Bot token의 `getMe` 인증과 429 해제를 확인했습니다. token과 Telegram 응답 원문은 출력하거나 문서에 저장하지 않았습니다.
 - 합성 진단의 n8n callback·`COMPLETED` 전환과 합성 상담의 `NEW` 저장 후, 진단 완료·상담 신청 Telegram 메시지가 실제 채널에 도착한 것을 확인했습니다.
 - 같은 멱등 키로 진단·상담을 재전송했을 때 모두 기존 ID와 `replayed: true`를 반환했고, DB에는 각각 한 건만 유지됐습니다.
-- 검증용 리드·진단·결과·상담·자동화 로그를 삭제했고 개발 서버, PostgreSQL과 n8n 컨테이너를 모두 종료했습니다.
+- 검증용 리드·진단·결과·상담·자동화 로그를 삭제했고 WEBAGENT 개발 서버와 프로젝트 전용 PostgreSQL·n8n 컨테이너를 종료했습니다. 기존 `n8n-v2` 계열 컨테이너는 변경하거나 종료하지 않았습니다.
 - 2026-09-09 전체 검증에서 ESLint, Vitest 18개 파일·112개 테스트, Next.js webpack production build가 모두 통과했습니다.
 - `next build`가 자동으로 바꾸는 `next-env.d.ts`는 추적 중인 원래 dev types 경로로 복원했으며 현재 작업 변경에 포함되지 않습니다.
-- 다음 작업은 7번 핵심 통합 및 E2E 테스트를 자동화하는 것입니다. 이후 실제 AI 연결(4B)과 운영 Compose(8번)를 진행합니다.
+- 현재 PC의 `n8n-v2` (`n8nio/n8n:2.12.2`, host `8678`), external runner, PostgreSQL 구성과 Compose 경로를 확인했습니다. WEBAGENT용 `N8N_WEBHOOK_SECRET`, `INTERNAL_API_SECRET`, `WEBAGENT_CALLBACK_URL`은 아직 주입되지 않았습니다.
+- `docs/consolidated/04-n8n-v2_WEBAGENT_연결가이드.md`에 재사용 권장안, secret 계약, workflow import·publish, callback과 전체 왕복 검증 순서를 기록했습니다.
+- 외부 Compose·`.env`, 실행 중인 n8n workflow와 컨테이너는 아직 변경하지 않았습니다.
+- 다음 작업은 기존 n8n-v2 workflow·DB 백업 후 Compose에 WEBAGENT 환경 변수를 주입하고, workflow import·publish·전체 왕복을 검증하는 것입니다. 이후 7번 핵심 E2E 자동화를 진행합니다.
 
 다음 세션 시작 명령:
 
 ```bash
 git status --short
-node -r dotenv/config -e 'console.log({ telegramConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) })'
-rg -n -A 28 "### 7\. 핵심 통합 및 E2E" task.md
-npm run test
+sed -n '1,280p' docs/consolidated/04-n8n-v2_WEBAGENT_연결가이드.md
+sed -n '1,180p' /Users/joymacmini/N8N_Server/N8N-V2/docker-compose.yml
+docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}'
 ```
 
 6번 Telegram 실제 연동 검증 기록:
@@ -123,8 +129,9 @@ npm run test
 8. R9 완료: AI 숫자 타입과 구현 단계 순서를 엄격히 검증하고 callback 422·정상 저장 회귀 테스트를 추가했습니다.
 9. R10 완료: 신뢰 프록시 IP 계약, 위조 헤더 차단, 만료 정리, 저장소 상한과 단일 인스턴스 운영 결정을 반영했습니다.
 10. 결과 화면(5번) 완료: 공개 DTO 타입과 전체 구조화 결과 표시, 상태·빈 데이터 fallback을 검증했습니다.
-11. Telegram 알림(6번) 완료: 진단 최초 완료·신규 상담 알림, timeout, 실패 격리와 중복 방지를 검증했고 실제 Telegram 채널 수신까지 확인했습니다. **다음 항목은 핵심 E2E(7번)입니다.** 실제 AI 연결(4B)은 공개 운영 전에 완료합니다.
-12. 운영 이미지(8번)를 검증하고, 운영 환경 준비(9번)와 백업·복원(10번)을 완료한 뒤 공개 운영합니다. 문서 동기화는 각 작업 완료 시 함께 진행합니다.
+11. Telegram 알림(6번) 완료: 진단 최초 완료·신규 상담 알림, timeout, 실패 격리와 중복 방지를 검증했고 실제 Telegram 채널 수신까지 확인했습니다.
+12. 기존 `n8n-v2:8678` 재사용 연결은 구성 조사와 실행 가이드까지 완료했습니다. **다음 항목은 백업 후 환경 변수 주입, workflow import·publish와 전체 왕복 검증입니다.**
+13. 이후 핵심 E2E(7번), 실제 AI 연결(4B), 운영 이미지(8번), 운영 환경(9번)과 백업·복원(10번) 순으로 진행합니다. 문서 동기화는 각 작업 완료 시 함께 진행합니다.
 
 ### 4A 완료 및 재검증 기록
 

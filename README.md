@@ -24,6 +24,7 @@ WEBAGENT.KR은 중소기업의 반복 업무를 입력받아 AI 자동화 가능
 7. `/diagnosis/result/[publicId]`에서 결과를 보여주고 상담 신청으로 연결합니다.
 
 n8n URL이 설정되지 않은 로컬 환경에서는 진단 데이터만 저장되고 Webhook 호출은 `skipped`로 처리됩니다.
+현재 PC에서 실행 중인 `n8n-v2:8678`을 재사용하는 방법은 [`04-n8n-v2_WEBAGENT_연결가이드.md`](docs/consolidated/04-n8n-v2_WEBAGENT_연결가이드.md)를 따릅니다. 이 연결은 구성 조사와 문서화만 완료됐고, 외부 Compose·환경 변수·workflow는 아직 변경하지 않았습니다.
 
 ## 구현 범위
 
@@ -279,4 +280,5 @@ AI 결과에는 최소한 `diagnosisPublicId`, `automationScore`, `recommendedTa
 - `docs/consolidated/01-MVP_통합_제품기획서.md`: 제품 포지셔닝, 대상 고객, MVP 범위와 사용자 흐름
 - `docs/consolidated/02-데이터베이스_아키텍처_선택지.md`: 데이터베이스 구성안과 현재 선택 근거
 - `docs/consolidated/03-PostgreSQL_MVP_개발실행서.md`: Next.js, PostgreSQL, n8n 구현 기준
+- `docs/consolidated/04-n8n-v2_WEBAGENT_연결가이드.md`: 현재 PC의 n8n-v2 재사용·workflow import·callback 연결 가이드
 - `AGENTS.md`: 저장소 작업 및 보안 지침
